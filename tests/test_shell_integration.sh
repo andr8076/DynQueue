@@ -10,7 +10,8 @@ output=$(env \
     XDG_RUNTIME_DIR="$runtime_dir" \
     DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
     DYNQUEUE_BASH_PRECHECKED=1 \
-    bash --noprofile --norc -i <<EOF
+bash --noprofile --norc -i <<EOF
+set +e
 source "$project_root/src/shell/dynqueue.bash"
 printf 'normal\n'
 echo one && echo two
@@ -58,6 +59,7 @@ cancel_output=$(env \
     DYNQUEUE_BASH_PRECHECKED=1 \
     SHELL_SESSION_ID=cancel-test \
     bash --noprofile --norc -i <<EOF
+set +e
 source "$project_root/src/shell/dynqueue.bash"
 printf '%s\n' "\$__dynqueue_queue_id" > "\$__dynqueue_session_dir/cancel" && printf 'CANCEL_SHOULD_NOT_RUN\n'
 printf 'after-cancel\n'
@@ -88,6 +90,7 @@ trap_output=$(env \
     DYNQUEUE_BASH_PRECHECKED=1 \
     SHELL_SESSION_ID=custom-trap-test \
     bash --noprofile --norc -i <<EOF
+set +e
 trap 'printf "CUSTOM_INT\n"' INT
 source "$project_root/src/shell/dynqueue.bash"
 printf 'ORIGINAL_CHAIN_EXECUTED\n' >> "$sigint_marker" && printf 'QUEUE_FINISHED\n'
@@ -116,6 +119,7 @@ debug_output=$(env \
     DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
     SHELL_SESSION_ID=custom-debug-test \
     bash --noprofile --norc -i 2>&1 <<EOF
+set +e
 trap ':' DEBUG
 source "$project_root/src/shell/dynqueue.bash"
 printf 'DEBUG_CHAIN_EXECUTED\n' >> "$debug_marker" && printf 'DEBUG_CHAIN_DONE\n'
@@ -143,6 +147,8 @@ trap 'echo ERR_HOOK_AFTER_QUEUE' ERR
 source "$project_root/src/shell/dynqueue.bash"
 true && echo OPTIONS_CHAIN
 echo OPTIONS_AFTER
+false && echo ERREXIT_QUEUE_SHOULD_NOT_RUN
+printf 'OPTIONS_AFTER_FAILED_QUEUE\n'
 set +e
 false
 true
@@ -151,6 +157,7 @@ EOF
 option_status=$?
 set -e
 if ((option_status != 0)) || [[ "$option_output" != *OPTIONS_CHAIN* ]] || [[ "$option_output" != *OPTIONS_AFTER* ]] \
+    || [[ "$option_output" != *OPTIONS_AFTER_FAILED_QUEUE* ]] \
     || [[ "$option_output" != *ERR_HOOK_AFTER_QUEUE* ]]; then
     printf '%s\n' "$option_output" >&2
     printf 'shell option compatibility test failed with status %s\n' "$option_status" >&2
