@@ -5,8 +5,7 @@ project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 runtime_dir=$(mktemp -d)
 trap 'rm -rf -- "$runtime_dir"' EXIT
 
-set +e
-output=$(env \
+if output=$(env \
     XDG_RUNTIME_DIR="$runtime_dir" \
     DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
     DYNQUEUE_BASH_PRECHECKED=1 \
@@ -25,9 +24,11 @@ printf 'after=%s\n' "\$TEST"
 false && echo SHOULD_NOT_RUN
 printf 'after-failure\n'
 EOF
-)
-status=$?
-set -e
+); then
+    status=0
+else
+    status=$?
+fi
 
 if ((status != 0 && status != 130)); then
     printf '%s\n' "$output" >&2
@@ -55,8 +56,7 @@ snapshot=$(find "$runtime_dir" -name snapshot -type f -print -quit)
 grep -F $'item-0\tfailed\t' "$snapshot" >/dev/null
 grep -F $'item-1\tstopped\t' "$snapshot" >/dev/null
 
-set +e
-cancel_output=$(env \
+if cancel_output=$(env \
     XDG_RUNTIME_DIR="$runtime_dir" \
     DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
     DYNQUEUE_BASH_PRECHECKED=1 \
@@ -67,9 +67,11 @@ source "$project_root/src/shell/dynqueue.bash"
 printf '%s\n' "\$__dynqueue_queue_id" > "\$__dynqueue_session_dir/cancel" && printf 'CANCEL_SHOULD_NOT_RUN\n'
 printf 'after-cancel\n'
 EOF
-)
-cancel_status=$?
-set -e
+); then
+    cancel_status=0
+else
+    cancel_status=$?
+fi
 if ((cancel_status != 0 && cancel_status != 130)); then
     printf '%s\n' "$cancel_output" >&2
     printf 'cancel test exited unexpectedly with status %s\n' "$cancel_status" >&2
@@ -84,10 +86,9 @@ cancel_snapshot="$runtime_dir/dynqueue-${UID}/cancel-test/snapshot"
 grep -F $'item-0\tcompleted\t' "$cancel_snapshot" >/dev/null
 grep -F $'item-1\tstopped\t' "$cancel_snapshot" >/dev/null
 
-set +e
 sigint_marker="$runtime_dir/sigint-marker"
 sigint_trap_state="$runtime_dir/sigint-trap-state"
-trap_output=$(env \
+if trap_output=$(env \
     XDG_RUNTIME_DIR="$runtime_dir" \
     DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
     DYNQUEUE_BASH_PRECHECKED=1 \
@@ -99,9 +100,11 @@ source "$project_root/src/shell/dynqueue.bash"
 printf 'ORIGINAL_CHAIN_EXECUTED\n' >> "$sigint_marker" && printf 'QUEUE_FINISHED\n'
 trap -p INT > "$sigint_trap_state"
 EOF
-)
-trap_status=$?
-set -e
+); then
+    trap_status=0
+else
+    trap_status=$?
+fi
 if ((trap_status != 0)); then
     printf '%s\n' "$trap_output" >&2
     printf 'custom SIGINT trap test exited unexpectedly with status %s\n' "$trap_status" >&2
@@ -116,8 +119,7 @@ if [[ "$trap_output" != *QUEUE_FINISHED* ]] || [[ "$trap_output" == *CUSTOM_INT*
 fi
 
 debug_marker="$runtime_dir/debug-marker"
-set +e
-debug_output=$(env \
+if debug_output=$(env \
     XDG_RUNTIME_DIR="$runtime_dir" \
     DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
     SHELL_SESSION_ID=custom-debug-test \
@@ -127,9 +129,11 @@ trap ':' DEBUG
 source "$project_root/src/shell/dynqueue.bash"
 printf 'DEBUG_CHAIN_EXECUTED\n' >> "$debug_marker" && printf 'DEBUG_CHAIN_DONE\n'
 EOF
-)
-debug_status=$?
-set -e
+); then
+    debug_status=0
+else
+    debug_status=$?
+fi
 if ((debug_status != 0)) || [[ "$debug_output" != *"DynQueue] not loaded"* ]] \
     || [[ "$debug_output" != *DEBUG_CHAIN_DONE* ]] || ! [[ -f "$debug_marker" ]] \
     || [[ $(wc -l <"$debug_marker") -ne 1 ]]; then
@@ -138,8 +142,7 @@ if ((debug_status != 0)) || [[ "$debug_output" != *"DynQueue] not loaded"* ]] \
     exit 1
 fi
 
-set +e
-option_output=$(env \
+if option_output=$(env \
     XDG_RUNTIME_DIR="$runtime_dir" \
     DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
     DYNQUEUE_BASH_PRECHECKED=1 \
@@ -156,9 +159,11 @@ set +e
 false
 true
 EOF
-)
-option_status=$?
-set -e
+); then
+    option_status=0
+else
+    option_status=$?
+fi
 if ((option_status != 0)) || [[ "$option_output" != *OPTIONS_CHAIN* ]] || [[ "$option_output" != *OPTIONS_AFTER* ]] \
     || [[ "$option_output" != *OPTIONS_AFTER_FAILED_QUEUE* ]] \
     || [[ "$option_output" != *ERR_HOOK_AFTER_QUEUE* ]]; then
