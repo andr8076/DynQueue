@@ -368,6 +368,12 @@ if [[ $- == *i* ]]; then
                 __dynqueue_run_queue "${encoded_items[@]}"
                 local queue_status=$__dynqueue_queue_status
 
+                # Do not let a failed item remain as the DEBUG trap's
+                # incoming status.  Bash 5.3 otherwise treats the later
+                # non-zero extdebug skip return as a fatal failure even when
+                # errexit is disabled in the interactive shell.
+                :
+
                 # The queue has already taken the place of the original
                 # command.  Return non-zero with extdebug enabled so Bash
                 # skips that original command exactly once.  A successful
