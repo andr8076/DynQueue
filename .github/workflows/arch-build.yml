@@ -18,8 +18,7 @@ jobs:
       - name: Configure and build
         shell: bash
         run: |
-          version_output=$(konsole --version 2>&1 || true)
-          version=$(printf '%s\n' "$version_output" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+          version=$(pacman -Q konsole | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
           test -n "$version"
           cmake -S . -B build \
             -DCMAKE_BUILD_TYPE=Release \

@@ -25,6 +25,9 @@ if ((${#missing[@]})); then
 fi
 
 version=$(konsole --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+if [[ -z "$version" ]] && command -v pacman >/dev/null 2>&1; then
+    version=$(pacman -Q konsole 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+fi
 if [[ -z "$version" ]]; then
     printf 'Could not determine the installed Konsole version.\n' >&2
     exit 1

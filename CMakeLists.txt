@@ -36,6 +36,20 @@ if(NOT DYNQUEUE_KONSOLE_VERSION)
 endif()
 
 if(NOT DYNQUEUE_KONSOLE_VERSION)
+    find_program(DYNQUEUE_PACMAN_EXECUTABLE pacman)
+    if(DYNQUEUE_PACMAN_EXECUTABLE)
+        execute_process(
+            COMMAND "${DYNQUEUE_PACMAN_EXECUTABLE}" -Q konsole
+            OUTPUT_VARIABLE DYNQUEUE_KONSOLE_PACKAGE_OUTPUT
+            ERROR_QUIET
+            OUTPUT_STRIP_TRAILING_WHITESPACE)
+        string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+"
+               DYNQUEUE_KONSOLE_VERSION
+               "${DYNQUEUE_KONSOLE_PACKAGE_OUTPUT}")
+    endif()
+endif()
+
+if(NOT DYNQUEUE_KONSOLE_VERSION)
     message(FATAL_ERROR
         "Could not determine the installed Konsole version. "
         "Pass -DDYNQUEUE_KONSOLE_VERSION=MAJOR.MINOR.MICRO.")
