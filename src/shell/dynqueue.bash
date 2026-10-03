@@ -248,6 +248,10 @@ if [[ $- == *i* ]]; then
                 [[ $__dynqueue_running == 0 ]] || return "$saved_status"
                 [[ $BASH_SUBSHELL == 0 ]] || return "$saved_status"
 
+                local current_history="${HISTCMD:-}"
+                [[ -n "$current_history" && "$current_history" != "$__dynqueue_last_histcmd" ]] || return "$saved_status"
+                __dynqueue_last_histcmd=$current_history
+
                 # The abort path is only safe while SIGINT retains Bash's
                 # normal behavior.  If a user installs a SIGINT trap after
                 # DynQueue was sourced, leave this command on the ordinary
@@ -258,10 +262,6 @@ if [[ $- == *i* ]]; then
                 IFS= read -r current_int_trap <"$__dynqueue_trap_probe" || current_int_trap=
                 rm -f -- "$__dynqueue_trap_probe"
                 [[ -z "$current_int_trap" ]] || return "$saved_status"
-
-                local current_history="${HISTCMD:-}"
-                [[ -n "$current_history" && "$current_history" != "$__dynqueue_last_histcmd" ]] || return "$saved_status"
-                __dynqueue_last_histcmd=$current_history
 
                 local old_history_time_format=${HISTTIMEFORMAT:-}
                 HISTTIMEFORMAT=
