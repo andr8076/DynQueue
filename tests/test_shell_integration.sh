@@ -27,7 +27,6 @@ false && echo SHOULD_NOT_RUN
 printf 'after-failure\n'
 EOF
 status=$?
-set -e
 if [[ -f "$output_file" ]]; then
     output=$(<"$output_file")
 else
@@ -41,6 +40,7 @@ if ((status != 0 && status != 130)); then
     printf 'interactive Bash integration exited unexpectedly with status %s\n' "$status" >&2
     exit 1
 fi
+set -e
 
 for expected in normal one two 'one && two' SHOULD_RUN /tmp 'test=hello' 'after=hello' after-failure; do
     if [[ "$output" != *"$expected"* ]]; then
