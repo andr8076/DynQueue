@@ -1,7 +1,6 @@
-file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/plugin")
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/plugin/konsole_dynqueue.in.json"
-    "${CMAKE_CURRENT_BINARY_DIR}/plugin/konsole_dynqueue.json"
+    "${CMAKE_CURRENT_BINARY_DIR}/konsole_dynqueue.json"
     @ONLY)
 
 add_library(konsole_dynqueueplugin MODULE
@@ -10,7 +9,7 @@ add_library(konsole_dynqueueplugin MODULE
     plugin/dynqueue_types.h
     plugin/dynqueuewidget.cpp
     plugin/dynqueuewidget.h
-    "${CMAKE_CURRENT_BINARY_DIR}/plugin/konsole_dynqueue.json"
+    "${CMAKE_CURRENT_BINARY_DIR}/konsole_dynqueue.json"
 )
 
 target_include_directories(konsole_dynqueueplugin PRIVATE
