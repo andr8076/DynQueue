@@ -47,9 +47,12 @@ created.
 - CMake, a C++ compiler, ECM, Qt6, KF6 CoreAddons, KF6 I18n, and KF6 XmlGui
 
 Konsole currently does not ship a separate external-plugin SDK. DynQueue keeps
-the minimum ABI declarations in `src/plugin/konsole_api_compat.h` and checks
-the Konsole major/minor version through plugin metadata. Rebuild DynQueue when
-Konsole changes its major/minor release or plugin ABI.
+the minimum ABI declarations in `src/plugin/konsole_api_compat.h`. The plugin
+also checks the exact Konsole version exposed by the host process and disables
+its UI when it differs from the version used for the build. If Konsole does
+not expose a version, DynQueue logs a warning and continues because there is
+no supported runtime API for a stronger check. Rebuild DynQueue after every
+Konsole upgrade.
 
 ## Install on Arch / EndeavourOS
 
@@ -61,8 +64,11 @@ The user-local installer is the normal route:
 
 It builds the plugin, installs it below `~/.local`, adds an idempotent Bash
 source block to `~/.bashrc`, and adds the user plugin directory to the Plasma
-session environment. Start a new Plasma session, or launch Konsole once with
-the printed `QT_PLUGIN_PATH` command.
+session environment. The source block checks for existing Bash `DEBUG` and
+`SIGINT` traps first. If either exists, DynQueue stays disabled so it cannot
+replace shell customizations or interfere with Ctrl+C behavior. Start a new
+Plasma session, or launch Konsole once with the printed `QT_PLUGIN_PATH`
+command.
 
 For a system-wide plugin installation:
 
@@ -120,14 +126,20 @@ cd /tmp && pwd
 export TEST=hello && echo "$TEST"
 ```
 
+The sidebar has a Stop button. It requests a safe stop after the current item
+finishes; it does not send a signal into the running program. Ctrl+C remains
+the normal way to interrupt the current command immediately.
+
 ## MVP boundaries
 
 - Bash is supported first; Zsh is not installed or modified.
 - Multiline command editing and here-documents are left on the normal Bash
   path for now.
+- Shell control constructs such as `if`, `for`, `case`, and `[[ ... ]]` are
+  rejected conservatively when they make queue boundaries ambiguous. Bash
+  executes them normally instead of DynQueue rewriting them.
 - Queue state is intentionally not persistent.
 - The sidebar can be hidden without stopping a queue.
 - The current shell bridge uses Bash's DEBUG trap and SIGINT abort path because
-  Konsole does not expose a pre-execution plugin hook. A shell that already
-  depends on a custom DEBUG trap should be integrated deliberately before
-  enabling DynQueue.
+  Konsole does not expose a pre-execution plugin hook. The installer refuses
+  to enable DynQueue when a custom DEBUG or SIGINT trap is already present.

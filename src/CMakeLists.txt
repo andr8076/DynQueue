@@ -17,6 +17,10 @@ target_include_directories(konsole_dynqueueplugin PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}/plugin"
 )
 
+target_compile_definitions(konsole_dynqueueplugin PRIVATE
+    DYNQUEUE_BUILT_KONSOLE_VERSION="${DYNQUEUE_KONSOLE_VERSION}"
+)
+
 target_link_libraries(konsole_dynqueueplugin PRIVATE
     Qt6::Core
     Qt6::Widgets

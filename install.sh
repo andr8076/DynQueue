@@ -13,7 +13,7 @@ else
 fi
 
 missing=()
-for command_name in cmake c++ python3 konsole; do
+for command_name in bash cmake c++ python3 konsole; do
     command -v "$command_name" >/dev/null 2>&1 || missing+=("$command_name")
 done
 
@@ -71,16 +71,41 @@ fi
 
 marker_start='# >>> DynQueue shell integration >>>'
 marker_end='# <<< DynQueue shell integration <<<'
-if [[ ! -f "$HOME/.bashrc" ]] || ! grep -Fq "$marker_start" "$HOME/.bashrc"; then
-    {
-        printf '\n%s\n' "$marker_start"
-        printf 'if [[ -f %q ]]; then source %q; fi\n' "$bash_source" "$bash_source"
-        printf '%s\n' "$marker_end"
-    } >>"$HOME/.bashrc"
-    printf 'Added the DynQueue Bash integration to %s/.bashrc\n' "$HOME"
+shell_rc="$HOME/.bashrc"
+shell_rc_temporary=$(mktemp)
+if [[ -f "$shell_rc" ]]; then
+    if grep -Fq "$marker_start" "$shell_rc" && ! grep -Fq "$marker_end" "$shell_rc"; then
+        rm -f -- "$shell_rc_temporary"
+        printf 'Refusing to update %s: DynQueue start marker has no matching end marker.\n' "$shell_rc" >&2
+        exit 1
+    fi
+    awk -v start="$marker_start" -v end="$marker_end" '
+        $0 == start { skipping=1; next }
+        $0 == end { skipping=0; next }
+        !skipping { print }
+    ' "$shell_rc" >"$shell_rc_temporary"
+    chmod --reference="$shell_rc" "$shell_rc_temporary" 2>/dev/null || true
 else
-    printf 'DynQueue Bash integration is already present in %s/.bashrc\n' "$HOME"
+    : >"$shell_rc_temporary"
 fi
+{
+    printf '\n%s\n' "$marker_start"
+    printf 'if [[ -f %q ]]; then\n' "$bash_source"
+    printf '    __dynqueue_trap_probe="${XDG_RUNTIME_DIR:-/tmp}/dynqueue-trap-probe.$$"\n'
+    printf '    trap -p DEBUG >"$__dynqueue_trap_probe" 2>/dev/null || true\n'
+    printf '    trap -p INT >>"$__dynqueue_trap_probe" 2>/dev/null || true\n'
+    printf '    if [[ ! -s "$__dynqueue_trap_probe" ]]; then\n'
+    printf '        DYNQUEUE_BASH_PRECHECKED=1 source %q\n' "$bash_source"
+    printf '    else\n'
+    printf '        printf "[DynQueue] disabled: an existing DEBUG or SIGINT trap was detected; normal shell behavior is unchanged.\\n" >&2\n'
+    printf '    fi\n'
+    printf '    rm -f -- "$__dynqueue_trap_probe"\n'
+    printf '    unset __dynqueue_trap_probe\n'
+    printf 'fi\n'
+    printf '%s\n' "$marker_end"
+} >>"$shell_rc_temporary"
+mv -- "$shell_rc_temporary" "$shell_rc"
+printf 'Installed the DynQueue Bash integration block in %s\n' "$shell_rc"
 
 if [[ $mode == user ]]; then
     env_dir="$HOME/.config/plasma-workspace/env"

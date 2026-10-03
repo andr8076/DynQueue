@@ -6,10 +6,11 @@
 #include <KPluginFactory>
 
 #include <algorithm>
+#include <cerrno>
 #include <iterator>
 #include <utility>
 
-#include <QDateTime>
+#include <QCoreApplication>
 #include <QDockWidget>
 #include <QFile>
 #include <QFileInfo>
@@ -32,6 +33,11 @@ namespace
 {
 constexpr auto SnapshotFileName = "snapshot";
 constexpr auto PendingFileName = "pending";
+constexpr auto CancelFileName = "cancel";
+
+#ifndef DYNQUEUE_BUILT_KONSOLE_VERSION
+#define DYNQUEUE_BUILT_KONSOLE_VERSION "unknown"
+#endif
 
 QString safeSessionName(const QString &value)
 {
@@ -67,7 +73,7 @@ DynQueueState stateFromString(const QByteArray &value)
 struct Snapshot {
     QString queueId;
     DynQueueItems items;
-    QDateTime modified;
+    QByteArray content;
 };
 
 bool readSnapshot(const QString &path, Snapshot &snapshot)
@@ -77,7 +83,8 @@ bool readSnapshot(const QString &path, Snapshot &snapshot)
         return false;
     }
 
-    const QList<QByteArray> lines = file.readAll().split('\n');
+    const QByteArray content = file.readAll();
+    const QList<QByteArray> lines = content.split('\n');
     if (lines.isEmpty()) {
         return false;
     }
@@ -104,8 +111,41 @@ bool readSnapshot(const QString &path, Snapshot &snapshot)
 
     snapshot.queueId = QString::fromUtf8(header.at(2));
     snapshot.items = items;
-    snapshot.modified = QFileInfo(path).lastModified();
+    snapshot.content = content;
     return !snapshot.queueId.isEmpty();
+}
+
+bool liveShell(const QString &sessionDirectory)
+{
+    QFile pidFile(sessionDirectory + QStringLiteral("/shell.pid"));
+    if (!pidFile.open(QIODevice::ReadOnly)) {
+        return false;
+    }
+
+    bool ok = false;
+    const qint64 pid = pidFile.readAll().trimmed().toLongLong(&ok);
+    if (!ok || pid <= 0) {
+        return false;
+    }
+
+    errno = 0;
+    const int result = ::kill(static_cast<pid_t>(pid), 0);
+    return result == 0 || errno == EPERM;
+}
+
+bool konsoleVersionMatches()
+{
+    const QString builtVersion = QStringLiteral(DYNQUEUE_BUILT_KONSOLE_VERSION);
+    const QString runtimeVersion = QCoreApplication::applicationVersion();
+    if (runtimeVersion.isEmpty()) {
+        qCWarning(DynQueueLog) << "Konsole did not expose an application version; ABI compatibility could not be checked";
+        return true;
+    }
+    if (runtimeVersion != builtVersion) {
+        qCWarning(DynQueueLog) << "DynQueue was built for Konsole" << builtVersion << "but is running in" << runtimeVersion << "; disabling plugin";
+        return false;
+    }
+    return true;
 }
 
 bool hasRunningItem(const DynQueueItems &items)
@@ -118,6 +158,7 @@ bool hasRunningItem(const DynQueueItems &items)
 } // namespace
 
 void writePending(const QString &sessionDirectory, const QString &queueId, const DynQueueItems &items);
+void writeCancel(const QString &sessionDirectory, const QString &queueId);
 
 struct DynQueuePlugin::Private {
     struct WindowState {
@@ -128,15 +169,17 @@ struct DynQueuePlugin::Private {
         QString sessionId;
         QString queueId;
         QString sessionDirectory;
-        QDateTime snapshotModified;
+        QByteArray snapshotContent;
         DynQueueItems items;
         bool manuallyHidden = false;
         bool changingVisibility = false;
+        bool stopRequested = false;
     };
 
     QHash<Konsole::MainWindow *, WindowState *> windows;
     QTimer *pollTimer = nullptr;
     QString runtimeRoot;
+    bool compatible = true;
 };
 
 DynQueuePlugin::DynQueuePlugin(QObject *parent, const QVariantList &args)
@@ -144,6 +187,7 @@ DynQueuePlugin::DynQueuePlugin(QObject *parent, const QVariantList &args)
     , d(std::make_unique<Private>())
 {
     setName(QStringLiteral("DynQueue"));
+    d->compatible = konsoleVersionMatches();
 
     QString runtimeDirectory = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);
     if (runtimeDirectory.isEmpty()) {
@@ -169,18 +213,20 @@ DynQueuePlugin::DynQueuePlugin(QObject *parent, const QVariantList &args)
                         state->sessionId = sessionId;
                         state->queueId.clear();
                         state->sessionDirectory = d->runtimeRoot + QLatin1Char('/') + sessionId;
-                        state->snapshotModified = {};
+                        state->snapshotContent.clear();
                         state->manuallyHidden = false;
+                        state->stopRequested = false;
                     }
                 }
             }
 
             const QString snapshotPath = state->sessionDirectory + QLatin1Char('/') + QLatin1String(SnapshotFileName);
             Snapshot snapshot;
-            if (state->sessionId.isEmpty() || !readSnapshot(snapshotPath, snapshot)) {
+            if (state->sessionId.isEmpty() || !liveShell(state->sessionDirectory) || !readSnapshot(snapshotPath, snapshot)) {
                 state->items.clear();
                 state->queueId.clear();
-                state->snapshotModified = {};
+                state->snapshotContent.clear();
+                state->stopRequested = false;
                 state->widget->clearQueue();
                 state->changingVisibility = true;
                 state->dock->hide();
@@ -189,19 +235,24 @@ DynQueuePlugin::DynQueuePlugin(QObject *parent, const QVariantList &args)
             }
 
             const bool newQueue = state->queueId != snapshot.queueId;
-            if (!newQueue && state->snapshotModified.isValid() && state->snapshotModified == snapshot.modified) {
+            if (!newQueue && state->snapshotContent == snapshot.content) {
                 continue;
             }
             if (newQueue) {
                 state->manuallyHidden = false;
+                state->stopRequested = false;
                 qCDebug(DynQueueLog) << "Detected queue" << snapshot.queueId << "for session" << state->sessionId;
             }
 
             state->queueId = snapshot.queueId;
             state->items = snapshot.items;
-            state->snapshotModified = snapshot.modified;
+            state->snapshotContent = snapshot.content;
             state->sessionDirectory = QFileInfo(snapshotPath).absolutePath();
-            state->widget->setQueue(state->items, hasRunningItem(state->items));
+            const bool queueActive = hasRunningItem(state->items);
+            if (!queueActive) {
+                state->stopRequested = false;
+            }
+            state->widget->setQueue(state->items, queueActive, state->stopRequested);
 
             if (!state->manuallyHidden && !state->dock->isVisible()) {
                 state->changingVisibility = true;
@@ -220,7 +271,7 @@ DynQueuePlugin::~DynQueuePlugin()
 
 void DynQueuePlugin::createWidgetsForMainWindow(Konsole::MainWindow *mainWindow)
 {
-    if (mainWindow == nullptr || d->windows.contains(mainWindow)) {
+    if (!d->compatible || mainWindow == nullptr || d->windows.contains(mainWindow)) {
         return;
     }
 
@@ -254,6 +305,16 @@ void DynQueuePlugin::createWidgetsForMainWindow(Konsole::MainWindow *mainWindow)
         state->dock->hide();
         state->changingVisibility = false;
     });
+    connect(state->widget, &DynQueueWidget::stopQueueRequested, this, [this, mainWindow] {
+        auto *state = d->windows.value(mainWindow, nullptr);
+        if (state == nullptr || !hasRunningItem(state->items) || state->stopRequested) {
+            return;
+        }
+        writeCancel(state->sessionDirectory, state->queueId);
+        state->stopRequested = true;
+        state->widget->setQueue(state->items, true, true);
+        qCDebug(DynQueueLog) << "Requested queue stop after current item for" << state->queueId;
+    });
     connect(state->widget, &DynQueueWidget::addCommandRequested, this, [this, mainWindow](const QString &command) {
         auto *state = d->windows.value(mainWindow, nullptr);
         if (state == nullptr || !hasRunningItem(state->items)) {
@@ -261,7 +322,7 @@ void DynQueuePlugin::createWidgetsForMainWindow(Konsole::MainWindow *mainWindow)
         }
         state->items.append(DynQueueItem{QUuid::createUuid().toString(QUuid::WithoutBraces), command, DynQueueState::Waiting});
         writePending(state->sessionDirectory, state->queueId, state->items);
-        state->widget->setQueue(state->items, true);
+        state->widget->setQueue(state->items, true, state->stopRequested);
         qCDebug(DynQueueLog) << "Added pending command to" << state->queueId;
     });
     connect(state->widget, &DynQueueWidget::removeCommandRequested, this, [this, mainWindow](const QString &itemId) {
@@ -275,7 +336,7 @@ void DynQueuePlugin::createWidgetsForMainWindow(Konsole::MainWindow *mainWindow)
         if (it != state->items.end()) {
             state->items.erase(it);
             writePending(state->sessionDirectory, state->queueId, state->items);
-            state->widget->setQueue(state->items, hasRunningItem(state->items));
+            state->widget->setQueue(state->items, hasRunningItem(state->items), state->stopRequested);
             qCDebug(DynQueueLog) << "Removed pending command" << itemId;
         }
     });
@@ -294,7 +355,7 @@ void DynQueuePlugin::createWidgetsForMainWindow(Konsole::MainWindow *mainWindow)
         }
         state->items.swapItemsAt(index, target);
         writePending(state->sessionDirectory, state->queueId, state->items);
-        state->widget->setQueue(state->items, hasRunningItem(state->items));
+        state->widget->setQueue(state->items, hasRunningItem(state->items), state->stopRequested);
         qCDebug(DynQueueLog) << "Moved pending command" << index << "to" << target;
     });
 
@@ -306,6 +367,9 @@ void DynQueuePlugin::createWidgetsForMainWindow(Konsole::MainWindow *mainWindow)
 
 void DynQueuePlugin::activeViewChanged(Konsole::SessionController *controller, Konsole::MainWindow *mainWindow)
 {
+    if (!d->compatible) {
+        return;
+    }
     auto *state = d->windows.value(mainWindow, nullptr);
     if (state == nullptr) {
         return;
@@ -315,7 +379,13 @@ void DynQueuePlugin::activeViewChanged(Konsole::SessionController *controller, K
     state->sessionId.clear();
     state->queueId.clear();
     state->sessionDirectory.clear();
-    state->snapshotModified = {};
+    state->snapshotContent.clear();
+    state->stopRequested = false;
+    state->items.clear();
+    state->widget->clearQueue();
+    state->changingVisibility = true;
+    state->dock->hide();
+    state->changingVisibility = false;
 
     if (controller != nullptr) {
         auto *compatController = reinterpret_cast<Konsole::SessionControllerCompat *>(controller);
@@ -331,6 +401,9 @@ void DynQueuePlugin::activeViewChanged(Konsole::SessionController *controller, K
 
 QList<QAction *> DynQueuePlugin::menuBarActions(Konsole::MainWindow *mainWindow) const
 {
+    if (!d->compatible) {
+        return {};
+    }
     auto *state = d->windows.value(mainWindow, nullptr);
     if (state == nullptr) {
         return {};
@@ -363,6 +436,9 @@ void writePending(const QString &sessionDirectory, const QString &queueId, const
         return;
     }
 
+    file.write("DYNQUEUE_PENDING\t1\t");
+    file.write(queueId.toUtf8());
+    file.putChar('\n');
     for (const auto &item : std::as_const(items)) {
         if (item.state != DynQueueState::Waiting) {
             continue;
@@ -375,6 +451,24 @@ void writePending(const QString &sessionDirectory, const QString &queueId, const
 
     if (!file.commit()) {
         qCWarning(DynQueueLog) << "Could not commit pending queue file" << file.fileName();
+    }
+}
+
+void writeCancel(const QString &sessionDirectory, const QString &queueId)
+{
+    if (sessionDirectory.isEmpty() || queueId.isEmpty()) {
+        return;
+    }
+
+    QSaveFile file(sessionDirectory + QLatin1Char('/') + QLatin1String(CancelFileName));
+    if (!file.open(QIODevice::WriteOnly)) {
+        qCWarning(DynQueueLog) << "Could not open queue cancel file" << file.fileName();
+        return;
+    }
+    file.write(queueId.toUtf8());
+    file.putChar('\n');
+    if (!file.commit()) {
+        qCWarning(DynQueueLog) << "Could not commit queue cancel file" << file.fileName();
     }
 }
 

@@ -16,17 +16,19 @@ class DynQueueWidget final : public QWidget
 public:
     explicit DynQueueWidget(QWidget *parent = nullptr);
 
-    void setQueue(const DynQueueItems &items, bool queueActive);
+    void setQueue(const DynQueueItems &items, bool queueActive, bool stopRequested = false);
     void clearQueue();
 
 Q_SIGNALS:
     void addCommandRequested(const QString &command);
     void removeCommandRequested(const QString &itemId);
     void moveCommandRequested(const QString &itemId, int direction);
+    void stopQueueRequested();
     void closeRequested();
 
 private Q_SLOTS:
     void addCommand();
+    void stopQueue();
     void removeCommand();
     void moveUp();
     void moveDown();
@@ -42,10 +44,12 @@ private:
     QListWidget *_list = nullptr;
     QLabel *_selectionLabel = nullptr;
     QPushButton *_addButton = nullptr;
+    QPushButton *_stopButton = nullptr;
     QPushButton *_removeButton = nullptr;
     QToolButton *_upButton = nullptr;
     QToolButton *_downButton = nullptr;
 
     DynQueueItems _items;
     bool _queueActive = false;
+    bool _stopRequested = false;
 };

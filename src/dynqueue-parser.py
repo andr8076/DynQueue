@@ -33,7 +33,43 @@ def split_top_level_andand(source: str) -> Optional[list[str]]:
     comment = False
     paren_depth = 0
     brace_depth = 0
+    test_depth = 0
     at_word_start = True
+    command_position = True
+    word: list[str] = []
+    word_plain = True
+    word_active = False
+    contains_shell_construct = False
+    shell_construct_words = {
+        "case",
+        "coproc",
+        "do",
+        "done",
+        "elif",
+        "else",
+        "esac",
+        "fi",
+        "for",
+        "function",
+        "if",
+        "in",
+        "select",
+        "then",
+        "time",
+        "until",
+        "while",
+    }
+
+    def finish_word() -> None:
+        nonlocal word_active, word_plain, contains_shell_construct, command_position
+        if command_position and word_active and word_plain and "".join(word) in shell_construct_words:
+            contains_shell_construct = True
+        if word_active:
+            command_position = False
+        word.clear()
+        word_active = False
+        word_plain = True
+
     i = 0
 
     while i < len(source):
@@ -57,18 +93,25 @@ def split_top_level_andand(source: str) -> Optional[list[str]]:
             continue
 
         if escaped:
+            word_active = True
+            word_plain = False
+            word.append(char)
             escaped = False
             at_word_start = False
             i += 1
             continue
 
         if char == "\\":
+            word_active = True
+            word_plain = False
             escaped = True
             at_word_start = False
             i += 1
             continue
 
         if char in ("'", '"', "`"):
+            word_active = True
+            word_plain = False
             quote = char
             at_word_start = False
             i += 1
@@ -79,54 +122,98 @@ def split_top_level_andand(source: str) -> Optional[list[str]]:
             i += 1
             continue
 
+        if at_word_start and char == "[" and i + 1 < len(source) and source[i + 1] == "[":
+            finish_word()
+            test_depth += 1
+            command_position = False
+            at_word_start = True
+            i += 2
+            continue
+
+        if at_word_start and char == "]" and i + 1 < len(source) and source[i + 1] == "]":
+            finish_word()
+            if test_depth:
+                test_depth -= 1
+            else:
+                return None
+            at_word_start = True
+            command_position = False
+            i += 2
+            continue
+
         if char == "(" :
+            finish_word()
             paren_depth += 1
             at_word_start = True
+            command_position = True
             i += 1
             continue
 
         if char == ")" and paren_depth:
+            finish_word()
             paren_depth -= 1
             at_word_start = True
+            command_position = False
             i += 1
             continue
 
         if char == "{":
+            finish_word()
             brace_depth += 1
             at_word_start = True
+            command_position = True
             i += 1
             continue
 
         if char == "}" and brace_depth:
+            finish_word()
             brace_depth -= 1
             at_word_start = True
+            command_position = False
             i += 1
             continue
 
         if char == "&" and i + 1 < len(source) and source[i + 1] == "&":
-            if paren_depth == 0 and brace_depth == 0:
+            finish_word()
+            if paren_depth == 0 and brace_depth == 0 and test_depth == 0:
                 item = source[start:i].strip()
                 if not item:
                     return None
                 parts.append(item)
                 start = i + 2
                 at_word_start = True
+                command_position = True
                 i += 2
                 continue
 
             at_word_start = True
+            command_position = True
             i += 2
             continue
 
         if char.isspace():
+            finish_word()
             at_word_start = True
         elif char in ";|&<>":
+            finish_word()
             at_word_start = True
+            command_position = True
         else:
+            word_active = True
+            word.append(char)
             at_word_start = False
         i += 1
 
-    if quote is not None or escaped or paren_depth != 0 or brace_depth != 0:
+    finish_word()
+
+    if (
+        quote is not None
+        or escaped
+        or paren_depth != 0
+        or brace_depth != 0
+        or test_depth != 0
+        or contains_shell_construct
+    ):
         return None
 
     tail = source[start:].strip()

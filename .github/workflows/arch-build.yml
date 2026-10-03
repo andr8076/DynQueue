@@ -1,0 +1,32 @@
+name: Arch build
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+
+    steps:
+      - name: Install source and build dependencies
+        run: pacman -Syu --noconfirm --needed git base-devel cmake extra-cmake-modules qt6-base kcoreaddons ki18n kxmlgui konsole python
+
+      - uses: actions/checkout@v4
+
+      - name: Configure and build
+        shell: bash
+        run: |
+          version=$(konsole --version | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1)
+          cmake -S . -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDYNQUEUE_KONSOLE_VERSION="$version"
+          cmake --build build --parallel
+
+      - name: Run parser and shell tests
+        shell: bash
+        run: |
+          python3 -m unittest discover -s tests -v
+          bash -n src/shell/dynqueue.bash
+          ./tests/test_shell_integration.sh

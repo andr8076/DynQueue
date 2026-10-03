@@ -43,6 +43,21 @@ class ParserTests(unittest.TestCase):
             ["command > file", "echo done"],
         )
 
+    def test_test_expression_is_not_split(self) -> None:
+        self.assertEqual(
+            PARSER.split_top_level_andand('[[ "$A" == one && "$B" == two ]] && echo done'),
+            ['[[ "$A" == one && "$B" == two ]]', "echo done"],
+        )
+
+    def test_shell_control_construct_is_rejected(self) -> None:
+        self.assertIsNone(PARSER.split_top_level_andand("if true; then echo one && echo two; fi"))
+
+    def test_reserved_word_as_argument_does_not_reject_a_simple_chain(self) -> None:
+        self.assertEqual(
+            PARSER.split_top_level_andand("echo done && echo ready"),
+            ["echo done", "echo ready"],
+        )
+
     def test_nested_command_substitution_is_one_item(self) -> None:
         self.assertEqual(
             PARSER.split_top_level_andand("echo $(printf 'a && b') && echo done"),

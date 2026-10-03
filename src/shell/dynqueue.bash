@@ -8,6 +8,9 @@
 
 if [[ $- == *i* ]]; then
     if [[ -z ${__DYNQUEUE_BASH_LOADED:-} ]]; then
+        if [[ ${DYNQUEUE_BASH_PRECHECKED:-0} != 1 ]]; then
+            printf '[DynQueue] not loaded: source it through the installed .bashrc integration block so existing shell traps can be checked safely.\n' >&2
+        else
         __DYNQUEUE_BASH_LOADED=1
 
         __dynqueue_parser="${DYNQUEUE_PARSER:-}"
@@ -28,7 +31,24 @@ if [[ $- == *i* ]]; then
         __dynqueue_session_id=${__dynqueue_session_raw//[^[:alnum:]._-]/_}
         __dynqueue_session_dir="${__dynqueue_runtime_base}/${__dynqueue_session_id}"
 
-        if [[ -n "$__dynqueue_parser" ]] && mkdir -p "$__dynqueue_session_dir" 2>/dev/null; then
+        # DynQueue's final safety step uses SIGINT to prevent Bash from
+        # continuing the original compound command after the queue has run.
+        # An existing SIGINT trap could swallow that signal and allow the
+        # original command to run a second time, so leave the shell entirely
+        # untouched when one is already installed.
+        if [[ -n "$__dynqueue_parser" ]]; then
+            mkdir -p "$__dynqueue_session_dir" 2>/dev/null || true
+        fi
+        __dynqueue_trap_probe="${__dynqueue_session_dir}/trap-probe.$$"
+        trap -p INT >"$__dynqueue_trap_probe" 2>/dev/null || true
+        IFS= read -r __dynqueue_existing_int_trap <"$__dynqueue_trap_probe" || __dynqueue_existing_int_trap=
+        rm -f -- "$__dynqueue_trap_probe"
+        if [[ -n "$__dynqueue_parser" ]] && [[ -n "$__dynqueue_existing_int_trap" ]]; then
+            printf '[DynQueue] disabled: an existing SIGINT trap was detected; normal shell behavior is unchanged.\n' >&2
+        fi
+
+        if [[ -n "$__dynqueue_parser" ]] && [[ -z "$__dynqueue_existing_int_trap" ]] \
+            && mkdir -p "$__dynqueue_session_dir" 2>/dev/null; then
             chmod 700 "$__dynqueue_runtime_base" "$__dynqueue_session_dir" 2>/dev/null || true
             printf '%s\n' "$$" >"${__dynqueue_session_dir}/shell.pid"
             chmod 600 "${__dynqueue_session_dir}/shell.pid" 2>/dev/null || true
@@ -71,14 +91,54 @@ if [[ $- == *i* ]]; then
                 mv -f "$temporary" "${__dynqueue_session_dir}/snapshot"
             }
 
+            __dynqueue_cancel_requested() {
+                local requested=
+                [[ -f "${__dynqueue_session_dir}/cancel" ]] || return 1
+                IFS= read -r requested <"${__dynqueue_session_dir}/cancel" || requested=
+                if [[ "$requested" == "$__dynqueue_queue_id" ]]; then
+                    rm -f -- "${__dynqueue_session_dir}/cancel"
+                    return 0
+                fi
+                # A request for an older queue must never affect a new queue.
+                rm -f -- "${__dynqueue_session_dir}/cancel"
+                return 1
+            }
+
+            __dynqueue_stop_remaining() {
+                local from_index=$1 remaining
+                for ((remaining = from_index; remaining < ${#__dynqueue_item_states[@]}; remaining++)); do
+                    __dynqueue_item_states[remaining]=stopped
+                done
+                __dynqueue_write_snapshot
+                __dynqueue_running=0
+                __dynqueue_debug_log "Queue stopped by user request"
+                return 130
+            }
+
             __dynqueue_apply_pending() {
                 local pending="${__dynqueue_session_dir}/pending"
                 [[ -e "$pending" ]] || return 0
 
                 local -a new_ids=()
                 local -a new_commands=()
-                local item_id encoded command invalid=0
-                while IFS=$'\t' read -r item_id encoded extra; do
+                local -a pending_lines=()
+                local pending_header pending_line item_id encoded extra command invalid=0
+                mapfile -t pending_lines <"$pending" || {
+                    rm -f -- "$pending"
+                    return 0
+                }
+                if ((${#pending_lines[@]} == 0)); then
+                    rm -f -- "$pending"
+                    return 0
+                fi
+                pending_header=${pending_lines[0]}
+                if [[ "$pending_header" != $'DYNQUEUE_PENDING\t1\t'"$__dynqueue_queue_id" ]]; then
+                    rm -f -- "$pending"
+                    __dynqueue_debug_log "Ignored stale pending queue update"
+                    return 0
+                fi
+                for pending_line in "${pending_lines[@]:1}"; do
+                    IFS=$'\t' read -r item_id encoded extra <<<"$pending_line"
                     [[ -z "$item_id" && -z "$encoded" ]] && continue
                     if [[ ! "$item_id" =~ ^[A-Za-z0-9._-]+$ || -z "$encoded" || -n "$extra" ]]; then
                         invalid=1
@@ -90,9 +150,10 @@ if [[ $- == *i* ]]; then
                     }
                     new_ids+=("$item_id")
                     new_commands+=("$command")
-                done <"$pending"
+                done
 
                 if ((invalid)); then
+                    rm -f -- "$pending"
                     __dynqueue_debug_log "Ignored malformed pending queue update"
                     return 0
                 fi
@@ -137,6 +198,11 @@ if [[ $- == *i* ]]; then
 
                 local index=0 status
                 while ((index < ${#__dynqueue_item_ids[@]})); do
+                    if __dynqueue_cancel_requested; then
+                        __dynqueue_stop_remaining "$index"
+                        return $?
+                    fi
+
                     __dynqueue_current_index=$index
                     __dynqueue_item_states[index]=running
                     __dynqueue_write_snapshot
@@ -145,14 +211,11 @@ if [[ $- == *i* ]]; then
                     # The command runs in the current interactive shell.  This
                     # preserves cd, export, aliases, functions, redirection,
                     # interactive programs, and the user's normal environment.
-                    trap - DEBUG
                     if eval "${__dynqueue_item_commands[index]}"; then
                         status=0
                     else
                         status=$?
                     fi
-                    trap '__dynqueue_debug_trap' DEBUG
-
                     if ((status == 0)); then
                         __dynqueue_item_states[index]=completed
                         __dynqueue_write_snapshot
@@ -165,6 +228,7 @@ if [[ $- == *i* ]]; then
                         for ((remaining = index + 1; remaining < ${#__dynqueue_item_states[@]}; remaining++)); do
                             __dynqueue_item_states[remaining]=stopped
                         done
+                        rm -f -- "${__dynqueue_session_dir}/cancel"
                         __dynqueue_write_snapshot
                         __dynqueue_debug_log "Item $index failed with status $status"
                         __dynqueue_running=0
@@ -173,6 +237,7 @@ if [[ $- == *i* ]]; then
                 done
 
                 __dynqueue_running=0
+                rm -f -- "${__dynqueue_session_dir}/pending" "${__dynqueue_session_dir}/cancel"
                 __dynqueue_write_snapshot
                 __dynqueue_debug_log "Queue finished"
                 return 0
@@ -182,6 +247,17 @@ if [[ $- == *i* ]]; then
                 local saved_status=$?
                 [[ $__dynqueue_running == 0 ]] || return "$saved_status"
                 [[ $BASH_SUBSHELL == 0 ]] || return "$saved_status"
+
+                # The abort path is only safe while SIGINT retains Bash's
+                # normal behavior.  If a user installs a SIGINT trap after
+                # DynQueue was sourced, leave this command on the ordinary
+                # Bash path instead of risking duplicate execution.
+                local current_int_trap
+                __dynqueue_trap_probe="${__dynqueue_session_dir}/int-trap-probe.$$.$RANDOM"
+                trap -p INT >"$__dynqueue_trap_probe" 2>/dev/null || true
+                IFS= read -r current_int_trap <"$__dynqueue_trap_probe" || current_int_trap=
+                rm -f -- "$__dynqueue_trap_probe"
+                [[ -z "$current_int_trap" ]] || return "$saved_status"
 
                 local current_history="${HISTCMD:-}"
                 [[ -n "$current_history" && "$current_history" != "$__dynqueue_last_histcmd" ]] || return "$saved_status"
@@ -211,15 +287,12 @@ if [[ $- == *i* ]]; then
                 mapfile -t encoded_items < <(printf '%s' "$entered_line" | "$__dynqueue_parser" 2>/dev/null)
                 (( ${#encoded_items[@]} >= 2 )) || return "$saved_status"
 
-                trap - DEBUG
                 local queue_status
                 if __dynqueue_run_queue "${encoded_items[@]}"; then
                     queue_status=0
                 else
                     queue_status=$?
                 fi
-                trap '__dynqueue_debug_trap' DEBUG
-
                 # Bash has no supported DEBUG-trap return value that cancels
                 # the current compound command.  SIGINT is the same abort path
                 # Bash uses for Ctrl+C and leaves the just-typed line out of
@@ -228,7 +301,12 @@ if [[ $- == *i* ]]; then
                 return "$queue_status"
             }
 
-            trap '__dynqueue_debug_trap' DEBUG
+            __dynqueue_install_debug_trap() {
+                trap '__dynqueue_debug_trap' DEBUG
+            }
+
+            __dynqueue_install_debug_trap
+        fi
         fi
     fi
 fi

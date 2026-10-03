@@ -20,7 +20,7 @@ find_package(KF6I18n 6.0 REQUIRED)
 find_package(KF6XmlGui 6.0 REQUIRED)
 
 set(DYNQUEUE_KONSOLE_VERSION "" CACHE STRING
-    "Full Konsole version used for plugin metadata, for example 26.08.1")
+    "Exact Konsole version used for the plugin build, for example 26.08.1")
 if(NOT DYNQUEUE_KONSOLE_VERSION)
     find_program(DYNQUEUE_KONSOLE_EXECUTABLE konsole)
     if(DYNQUEUE_KONSOLE_EXECUTABLE)

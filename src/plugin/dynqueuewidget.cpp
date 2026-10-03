@@ -57,6 +57,11 @@ DynQueueWidget::DynQueueWidget(QWidget *parent)
     _addButton->setToolTip(tr("Add a command to the end of the pending queue"));
     connect(_addButton, &QPushButton::clicked, this, &DynQueueWidget::addCommand);
     actionsLayout->addWidget(_addButton);
+
+    _stopButton = new QPushButton(tr("Stop"), this);
+    _stopButton->setToolTip(tr("Finish the current command, then stop the queue"));
+    connect(_stopButton, &QPushButton::clicked, this, &DynQueueWidget::stopQueue);
+    actionsLayout->addWidget(_stopButton);
     actionsLayout->addStretch();
 
     _upButton = new QToolButton(this);
@@ -89,7 +94,7 @@ DynQueueWidget::DynQueueWidget(QWidget *parent)
     updateControls();
 }
 
-void DynQueueWidget::setQueue(const DynQueueItems &items, bool queueActive)
+void DynQueueWidget::setQueue(const DynQueueItems &items, bool queueActive, bool stopRequested)
 {
     QString selectedId;
     if (_list->currentItem() != nullptr) {
@@ -98,6 +103,7 @@ void DynQueueWidget::setQueue(const DynQueueItems &items, bool queueActive)
 
     _items = items;
     _queueActive = queueActive;
+    _stopRequested = stopRequested;
     rebuildList(selectedId);
 }
 
@@ -105,6 +111,7 @@ void DynQueueWidget::clearQueue()
 {
     _items.clear();
     _queueActive = false;
+    _stopRequested = false;
     _list->clear();
     updateControls();
 }
@@ -193,6 +200,13 @@ void DynQueueWidget::addCommand()
     }
 }
 
+void DynQueueWidget::stopQueue()
+{
+    if (_queueActive && !_stopRequested) {
+        Q_EMIT stopQueueRequested();
+    }
+}
+
 void DynQueueWidget::removeCommand()
 {
     const int row = _list->currentRow();
@@ -221,15 +235,27 @@ void DynQueueWidget::updateControls()
 {
     const int row = _list->currentRow();
     const bool waiting = row >= 0 && row < _items.size() && _items.at(row).state == DynQueueState::Waiting;
-    _addButton->setEnabled(_queueActive);
-    _removeButton->setEnabled(waiting);
-    _upButton->setEnabled(waiting && row > 1);
-    _downButton->setEnabled(waiting && row + 1 < _items.size());
+    _addButton->setEnabled(_queueActive && !_stopRequested);
+    _stopButton->setText(_stopRequested ? tr("Stopping…") : tr("Stop"));
+    _stopButton->setEnabled(_queueActive && !_stopRequested);
+    _removeButton->setEnabled(waiting && !_stopRequested);
+    _upButton->setEnabled(waiting && !_stopRequested && row > 1);
+    _downButton->setEnabled(waiting && !_stopRequested && row + 1 < _items.size());
 
     if (waiting) {
-        _selectionLabel->setText(tr("Selected command: %1").arg(_items.at(row).command));
+        if (_stopRequested) {
+            _selectionLabel->setText(tr("Stopping after the current command"));
+        } else {
+            _selectionLabel->setText(tr("Selected command: %1").arg(_items.at(row).command));
+        }
     } else if (row >= 0 && row < _items.size()) {
-        _selectionLabel->setText(tr("Only waiting commands can be edited"));
+        if (_stopRequested) {
+            _selectionLabel->setText(tr("Stopping after the current command"));
+        } else {
+            _selectionLabel->setText(tr("Only waiting commands can be edited"));
+        }
+    } else if (_stopRequested) {
+        _selectionLabel->setText(tr("Stopping after the current command"));
     } else {
         _selectionLabel->setText(tr("Select a waiting command to edit"));
     }

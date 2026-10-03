@@ -6,12 +6,17 @@ marker_start='# >>> DynQueue shell integration >>>'
 marker_end='# <<< DynQueue shell integration <<<'
 
 if [[ -f "$HOME/.bashrc" ]]; then
+    if grep -Fq "$marker_start" "$HOME/.bashrc" && ! grep -Fq "$marker_end" "$HOME/.bashrc"; then
+        printf 'Refusing to edit %s: DynQueue start marker has no matching end marker.\n' "$HOME/.bashrc" >&2
+        exit 1
+    fi
     temporary=$(mktemp)
     awk -v start="$marker_start" -v end="$marker_end" '
         $0 == start { skipping=1; next }
         $0 == end { skipping=0; next }
         !skipping { print }
     ' "$HOME/.bashrc" >"$temporary"
+    chmod --reference="$HOME/.bashrc" "$temporary" 2>/dev/null || true
     mv -- "$temporary" "$HOME/.bashrc"
 fi
 
