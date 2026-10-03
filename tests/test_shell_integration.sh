@@ -30,7 +30,12 @@ then
 else
     status=$?
 fi
-output=$(<"$output_file")
+if [[ -f "$output_file" ]]; then
+    output=$(<"$output_file")
+else
+    output=
+    printf 'first test output file disappeared: %s\n' "$output_file" >&2
+fi
 
 if ((status != 0 && status != 130)); then
     printf '%s\n' "$output" >&2
