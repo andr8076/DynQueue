@@ -20,6 +20,7 @@ cd /tmp && pwd
 export TEST=hello && printf 'test=%s\n' "\$TEST"
 printf 'after=%s\n' "\$TEST"
 false && echo SHOULD_NOT_RUN
+printf 'after-failure\n'
 EOF
 )
 status=$?
@@ -31,7 +32,7 @@ if ((status != 0 && status != 130)); then
     exit 1
 fi
 
-for expected in normal one two 'one && two' SHOULD_RUN /tmp 'test=hello' 'after=hello'; do
+for expected in normal one two 'one && two' SHOULD_RUN /tmp 'test=hello' 'after=hello' after-failure; do
     if [[ "$output" != *"$expected"* ]]; then
         printf '%s\n' "$output" >&2
         printf 'missing expected output: %s\n' "$expected" >&2
