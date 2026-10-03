@@ -52,8 +52,10 @@ locates the active session through Konsole's exported
 `SessionDisplayConnection` QObject instead of assuming the private
 `SessionController` member layout. It also checks the exact Konsole version
 exposed by the host process and disables its UI when the version is missing or
-differs from the version used for the build. Rebuild DynQueue after every
-Konsole upgrade.
+differs from the version used for the build. The user-local installer checks
+the installed version at each new Plasma session, rebuilds when needed, and
+only exports the plugin path after a successful match. If the rebuild fails,
+the old plugin is withheld instead of being loaded into the new Konsole.
 
 ## Install on Arch / EndeavourOS
 
@@ -65,12 +67,15 @@ The user-local installer is the normal route:
 
 It builds the plugin, installs it below `~/.local`, adds an idempotent Bash
 source block to `~/.bashrc`, and adds the user plugin directory to the Plasma
-session environment. The source block checks for an existing Bash `DEBUG` trap
+session environment. At each new Plasma session, that environment hook
+rebuilds the plugin if Konsole has changed and disables the plugin path if the
+refresh cannot be completed. This is automatic for the user-local install;
+system-wide installs still need an administrator-controlled rebuild after a
+Konsole upgrade. The source block checks for an existing Bash `DEBUG` trap
 first. If one exists, DynQueue stays disabled so it cannot replace shell
 customizations. DynQueue does not install or synthesize a `SIGINT` trap, so an
-existing Ctrl+C handler continues to belong to the user. Start a new
-Plasma session, or launch Konsole once with the printed `QT_PLUGIN_PATH`
-command.
+existing Ctrl+C handler continues to belong to the user. Start a new Plasma
+session after installation.
 
 For a system-wide plugin installation:
 
@@ -147,5 +152,8 @@ the normal way to interrupt the current command immediately.
 - The current shell bridge uses Bash's DEBUG trap because Konsole does not
   expose a pre-execution plugin hook. Bash's `extdebug` mode skips every
   simple command in the replaced history entry, so DynQueue does not send a
-  synthetic signal. The installer refuses to enable DynQueue when a custom
-  DEBUG trap is already present; custom SIGINT traps are supported.
+  synthetic signal. Bash provides one DEBUG-trap slot, and arbitrary trap
+  actions cannot be safely multiplexed without changing their shell
+  semantics, so the installer refuses to enable DynQueue when a custom DEBUG
+  trap is already present. It leaves that trap untouched; custom SIGINT traps
+  are supported.

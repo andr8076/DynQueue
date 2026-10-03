@@ -29,5 +29,5 @@ jobs:
         shell: bash
         run: |
           python3 -m unittest discover -s tests -v
-          bash -n src/shell/dynqueue.bash
+          bash -n install.sh uninstall.sh src/shell/dynqueue.bash tools/dynqueue-refresh.sh
           ./tests/test_shell_integration.sh

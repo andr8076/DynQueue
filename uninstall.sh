@@ -22,6 +22,9 @@ fi
 
 rm -f -- "$prefix/share/dynqueue/dynqueue.bash" \
        "$prefix/libexec/dynqueue-parser.py" \
+       "$prefix/libexec/dynqueue-refresh" \
+       "$prefix/share/dynqueue/konsole-build-version" \
+       "$prefix/share/dynqueue/.refresh.lock" \
        "$HOME/.config/plasma-workspace/env/dynqueue.sh"
 rm -f -- "$prefix/lib/qt6/plugins/konsoleplugins/libkonsole_dynqueueplugin.so"
 

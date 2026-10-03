@@ -72,6 +72,13 @@ else
     cmake --install "$build_dir"
 fi
 
+if [[ $mode == user ]]; then
+    install -Dm755 "$project_dir/tools/dynqueue-refresh.sh" "$prefix/libexec/dynqueue-refresh"
+    mkdir -p "$prefix/share/dynqueue"
+    printf '%s\n' "$version" >"$prefix/share/dynqueue/konsole-build-version"
+    chmod 600 "$prefix/share/dynqueue/konsole-build-version"
+fi
+
 marker_start='# >>> DynQueue shell integration >>>'
 marker_end='# <<< DynQueue shell integration <<<'
 shell_rc="$HOME/.bashrc"
@@ -116,10 +123,20 @@ if [[ $mode == user ]]; then
     env_dir="$HOME/.config/plasma-workspace/env"
     env_file="$env_dir/dynqueue.sh"
     mkdir -p "$env_dir"
-    cat >"$env_file" <<EOF
-#!/usr/bin/env bash
-export QT_PLUGIN_PATH="$plugin_dir\${QT_PLUGIN_PATH:+:\$QT_PLUGIN_PATH}"
-EOF
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'if [[ -x %q ]]; then\n' "$prefix/libexec/dynqueue-refresh"
+        printf '    DYNQUEUE_SOURCE_DIR=%q DYNQUEUE_BUILD_DIR=%q DYNQUEUE_PREFIX=%q DYNQUEUE_KONSOLE_APP_LIBRARY=%q DYNQUEUE_KONSOLE_PRIVATE_LIBRARY=%q %q >/dev/null 2>&1 || printf '\''[DynQueue] disabled: could not rebuild for the installed Konsole version.\\n'\'' >&2\n' \
+            "$project_dir" "$build_dir" "$prefix" "${KONSOLE_APP_LIBRARY:-}" "${KONSOLE_PRIVATE_LIBRARY:-}" "$prefix/libexec/dynqueue-refresh"
+        printf 'fi\n'
+        printf '%s\n' 'dynqueue_version=$(konsole --version 2>/dev/null | grep -Eo '\''[0-9]+\.[0-9]+\.[0-9]+'\'' | head -n1 || true)'
+        printf 'if [[ -n "$dynqueue_version" ]] && [[ -f %q ]] && [[ $(<%q) == "$dynqueue_version" ]] && [[ -f %q ]]; then\n' \
+            "$prefix/share/dynqueue/konsole-build-version" \
+            "$prefix/share/dynqueue/konsole-build-version" \
+            "$plugin_dir/konsoleplugins/libkonsole_dynqueueplugin.so"
+        printf '    export QT_PLUGIN_PATH=%q${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}\n' "$plugin_dir"
+        printf 'fi\n'
+    } >"$env_file"
     chmod 755 "$env_file"
 fi
 
