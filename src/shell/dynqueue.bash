@@ -42,6 +42,7 @@ if [[ $- == *i* ]]; then
             chmod 600 "${__dynqueue_session_dir}/shell.pid" 2>/dev/null || true
 
             __dynqueue_queue_id=
+            __dynqueue_queue_status=0
             __dynqueue_current_index=-1
             __dynqueue_last_histcmd=
             __dynqueue_running=0
@@ -235,6 +236,7 @@ if [[ $- == *i* ]]; then
             __dynqueue_run_queue() {
                 local encoded command
                 __dynqueue_queue_id="q-${HISTCMD:-0}-${BASHPID}-${RANDOM}"
+                __dynqueue_queue_status=0
                 __dynqueue_current_index=-1
                 __dynqueue_item_ids=()
                 __dynqueue_item_commands=()
@@ -242,7 +244,13 @@ if [[ $- == *i* ]]; then
 
                 local item_number=0
                 for encoded in "$@"; do
-                    command=$(__dynqueue_b64_decode "$encoded") || return 2
+                    if command=$(__dynqueue_b64_decode "$encoded"); then
+                        :
+                    else
+                        __dynqueue_queue_status=2
+                        __dynqueue_running=0
+                        return 0
+                    fi
                     __dynqueue_item_ids+=("item-${item_number}")
                     __dynqueue_item_commands+=("$command")
                     __dynqueue_item_states+=("waiting")
@@ -256,8 +264,9 @@ if [[ $- == *i* ]]; then
                 local index=0 status
                 while ((index < ${#__dynqueue_item_ids[@]})); do
                     if __dynqueue_cancel_requested; then
-                        __dynqueue_stop_remaining "$index"
-                        return $?
+                        __dynqueue_stop_remaining "$index" || true
+                        __dynqueue_queue_status=130
+                        return 0
                     fi
 
                     __dynqueue_current_index=$index
@@ -289,8 +298,14 @@ if [[ $- == *i* ]]; then
                         rm -f -- "${__dynqueue_session_dir}/cancel"
                         __dynqueue_write_snapshot
                         __dynqueue_debug_log "Item $index failed with status $status"
+                        __dynqueue_queue_status=$status
                         __dynqueue_running=0
-                        return "$status"
+                        # Keep the queue runner itself successful.  The DEBUG
+                        # trap has a separate non-zero return for extdebug's
+                        # command skip; propagating the item failure through
+                        # this function makes newer Bash releases treat the
+                        # trap unwind as a shell-fatal error.
+                        return 0
                     fi
                 done
 
@@ -350,12 +365,8 @@ if [[ $- == *i* ]]; then
                 mapfile -t encoded_items < <(printf '%s' "$entered_line" | "$__dynqueue_parser" 2>/dev/null)
                 (( ${#encoded_items[@]} >= 2 )) || return "$saved_status"
 
-                local queue_status
-                if __dynqueue_run_queue "${encoded_items[@]}"; then
-                    queue_status=0
-                else
-                    queue_status=$?
-                fi
+                __dynqueue_run_queue "${encoded_items[@]}"
+                local queue_status=$__dynqueue_queue_status
 
                 # The queue has already taken the place of the original
                 # command.  Return non-zero with extdebug enabled so Bash
