@@ -114,8 +114,10 @@ bash -n src/shell/dynqueue.bash
 ```
 
 The tests cover real chains, quoted `&&`, pipelines, redirection, command
-substitution, brace groups, `cd`, `export`, incomplete chains, normal command
-handling, and failure stopping the remaining queue.
+substitution, brace groups, `[[ ... ]]`, shell control constructs, `cd`,
+`export`, incomplete chains, normal command handling, failure stopping the
+remaining queue, safe queue cancellation, existing SIGINT traps, and Bash
+`errexit`/`errtrace`/`functrace` options.
 Manual checks should also cover ordinary `ls`, `ssh`, `nano`, `htop`, Python,
 and `sudo` input, plus:
 

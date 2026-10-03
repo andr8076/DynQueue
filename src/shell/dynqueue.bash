@@ -297,7 +297,30 @@ if [[ $- == *i* ]]; then
                 # the current compound command.  SIGINT is the same abort path
                 # Bash uses for Ctrl+C and leaves the just-typed line out of
                 # the shell's execution stream after the queue has run.
+                local errexit_was_set=0
+                case $- in
+                    *e*) errexit_was_set=1; set +e ;;
+                esac
+
+                # The self-SIGINT normally returns status 130.  Temporarily
+                # suspend an existing ERR trap so DynQueue does not fabricate
+                # an error notification for its own abort mechanism, then
+                # restore the user's exact trap definition.
+                local err_trap_spec= err_trap_saved=0
+                __dynqueue_trap_probe="${__dynqueue_session_dir}/err-trap-probe.$$.$RANDOM"
+                trap -p ERR >"$__dynqueue_trap_probe" 2>/dev/null || true
+                if IFS= read -r err_trap_spec <"$__dynqueue_trap_probe"; then
+                    err_trap_saved=1
+                    trap - ERR
+                fi
+                rm -f -- "$__dynqueue_trap_probe"
                 kill -INT "$$" 2>/dev/null
+                if ((err_trap_saved)); then
+                    eval "$err_trap_spec"
+                fi
+                if ((errexit_was_set)); then
+                    set -e
+                fi
                 return "$queue_status"
             }
 

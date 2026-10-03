@@ -102,4 +102,27 @@ if [[ "$trap_output" != *ORIGINAL_CHAIN* ]] || [[ "$trap_output" == *CUSTOM_INT*
     exit 1
 fi
 
+set +e
+option_output=$(env \
+    XDG_RUNTIME_DIR="$runtime_dir" \
+    DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
+    DYNQUEUE_BASH_PRECHECKED=1 \
+    SHELL_SESSION_ID=shell-options-test \
+    bash --noprofile --norc -i <<EOF
+set -eE -T
+trap 'echo ERR_HOOK_SHOULD_NOT_RUN' ERR
+source "$project_root/src/shell/dynqueue.bash"
+true && echo OPTIONS_CHAIN
+echo OPTIONS_AFTER
+EOF
+)
+option_status=$?
+set -e
+if ((option_status != 0)) || [[ "$option_output" != *OPTIONS_CHAIN* ]] || [[ "$option_output" != *OPTIONS_AFTER* ]] \
+    || [[ "$option_output" == *ERR_HOOK_SHOULD_NOT_RUN* ]]; then
+    printf '%s\n' "$option_output" >&2
+    printf 'shell option compatibility test failed with status %s\n' "$option_status" >&2
+    exit 1
+fi
+
 printf 'Bash integration test passed\n'
