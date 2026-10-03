@@ -32,6 +32,9 @@ else
     output=
     printf 'first test output file disappeared: %s\n' "$output_file" >&2
 fi
+printf 'first-child-status=%s\n' "$status" >&2
+printf '%s\n' "$output" >&2
+find "$runtime_dir" -type f -print -exec sed -n '1,80p' {} \; >&2
 
 if ((status != 0 && status != 130)); then
     printf '%s\n' "$output" >&2
