@@ -5,12 +5,13 @@ project_root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 runtime_dir=$(mktemp -d)
 trap 'rm -rf -- "$runtime_dir"' EXIT
 
-if output=$(env \
+output_file="$runtime_dir/first-output"
+if env \
     XDG_RUNTIME_DIR="$runtime_dir" \
     DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
     DYNQUEUE_BASH_PRECHECKED=1 \
     DYNQUEUE_DEBUG=1 \
-    bash --noprofile --norc -i <<EOF
+    bash --noprofile --norc -i >"$output_file" <<EOF
 set +e
 printf 'flags-before-source=%s\n' "\$-"
 source "$project_root/src/shell/dynqueue.bash"
@@ -24,11 +25,12 @@ printf 'after=%s\n' "\$TEST"
 false && echo SHOULD_NOT_RUN
 printf 'after-failure\n'
 EOF
-); then
+then
     status=0
 else
     status=$?
 fi
+output=$(<"$output_file")
 
 if ((status != 0 && status != 130)); then
     printf '%s\n' "$output" >&2
