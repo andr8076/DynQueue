@@ -3,6 +3,7 @@
 #include "dynqueuewidget.h"
 
 #include <KLocalizedString>
+#include <KAboutData>
 #include <KPluginFactory>
 
 #include <algorithm>
@@ -18,6 +19,7 @@
 #include <QLoggingCategory>
 #include <QMainWindow>
 #include <QMenu>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QTimer>
@@ -52,6 +54,27 @@ QString safeSessionName(const QString &value)
         }
     }
     return result;
+}
+
+QPointer<Konsole::Session> sessionForController(Konsole::SessionController *controller)
+{
+    if (controller == nullptr) {
+        return {};
+    }
+
+    // SessionController::session() is an inline method in Konsole's private
+    // headers.  Its SessionDisplayConnection is an exported QObject child,
+    // so finding that child avoids depending on the private controller's
+    // member offsets and multiple-inheritance layout.
+    auto *controllerObject = reinterpret_cast<QObject *>(controller);
+    const auto connections = controllerObject->findChildren<QObject *>(QString(), Qt::FindDirectChildrenOnly);
+    for (QObject *child : connections) {
+        if (child != nullptr && child->inherits("Konsole::SessionDisplayConnection")) {
+            auto *connection = reinterpret_cast<Konsole::SessionDisplayConnection *>(child);
+            return connection->session();
+        }
+    }
+    return {};
 }
 
 DynQueueState stateFromString(const QByteArray &value)
@@ -134,13 +157,26 @@ bool liveShell(const QString &sessionDirectory)
     return result == 0 || errno == EPERM;
 }
 
+QString normalizedKonsoleVersion(const QString &value)
+{
+    static const QRegularExpression versionPattern(QStringLiteral(R"(^(\d+\.\d+\.\d+))"));
+    const auto match = versionPattern.match(value.trimmed());
+    return match.hasMatch() ? match.captured(1) : QString();
+}
+
 bool konsoleVersionMatches()
 {
-    const QString builtVersion = QStringLiteral(DYNQUEUE_BUILT_KONSOLE_VERSION);
-    const QString runtimeVersion = QCoreApplication::applicationVersion();
+    const QString builtVersion = normalizedKonsoleVersion(QStringLiteral(DYNQUEUE_BUILT_KONSOLE_VERSION));
+    QString runtimeVersion = normalizedKonsoleVersion(KAboutData::applicationData().version());
     if (runtimeVersion.isEmpty()) {
-        qCWarning(DynQueueLog) << "Konsole did not expose an application version; ABI compatibility could not be checked";
-        return true;
+        runtimeVersion = normalizedKonsoleVersion(QCoreApplication::applicationVersion());
+    }
+    if (builtVersion.isEmpty() || runtimeVersion.isEmpty()) {
+        qCWarning(DynQueueLog) << "Could not verify the exact Konsole version; disabling DynQueue for safety"
+                               << "(built:" << DYNQUEUE_BUILT_KONSOLE_VERSION
+                               << ", runtime:" << KAboutData::applicationData().version()
+                               << QCoreApplication::applicationVersion() << ')';
+        return false;
     }
     if (runtimeVersion != builtVersion) {
         qCWarning(DynQueueLog) << "DynQueue was built for Konsole" << builtVersion << "but is running in" << runtimeVersion << "; disabling plugin";
@@ -206,8 +242,7 @@ DynQueuePlugin::DynQueuePlugin(QObject *parent, const QVariantList &args)
 
             if (!state->controller.isNull()) {
                 auto *controller = reinterpret_cast<Konsole::SessionController *>(state->controller.data());
-                auto *compatController = reinterpret_cast<Konsole::SessionControllerCompat *>(controller);
-                const auto sessionPointer = compatController->session();
+                const auto sessionPointer = sessionForController(controller);
                 if (!sessionPointer.isNull()) {
                     const QString sessionId = safeSessionName(sessionPointer->shellSessionId());
                     if (!sessionId.isEmpty() && sessionId != state->sessionId) {
@@ -218,6 +253,12 @@ DynQueuePlugin::DynQueuePlugin(QObject *parent, const QVariantList &args)
                         state->manuallyHidden = false;
                         state->stopRequested = false;
                     }
+                } else if (!state->sessionId.isEmpty()) {
+                    state->sessionId.clear();
+                    state->queueId.clear();
+                    state->sessionDirectory.clear();
+                    state->snapshotContent.clear();
+                    state->stopRequested = false;
                 }
             }
 
@@ -389,8 +430,7 @@ void DynQueuePlugin::activeViewChanged(Konsole::SessionController *controller, K
     state->changingVisibility = false;
 
     if (controller != nullptr) {
-        auto *compatController = reinterpret_cast<Konsole::SessionControllerCompat *>(controller);
-        const auto sessionPointer = compatController->session();
+        const auto sessionPointer = sessionForController(controller);
         if (!sessionPointer.isNull()) {
             state->sessionId = safeSessionName(sessionPointer->shellSessionId());
             if (!state->sessionId.isEmpty()) {

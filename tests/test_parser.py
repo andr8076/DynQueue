@@ -52,6 +52,23 @@ class ParserTests(unittest.TestCase):
     def test_shell_control_construct_is_rejected(self) -> None:
         self.assertIsNone(PARSER.split_top_level_andand("if true; then echo one && echo two; fi"))
 
+    def test_shell_state_mutation_is_rejected(self) -> None:
+        for source in (
+            "trap 'echo nope' INT && echo two",
+            "set -e && echo two",
+            "source ./setup.sh && echo two",
+            "exec ./replacement && echo two",
+            "NAME=value trap 'echo nope' INT && echo two",
+        ):
+            with self.subTest(source=source):
+                self.assertIsNone(PARSER.split_top_level_andand(source))
+
+    def test_unsafe_word_as_argument_is_not_rejected(self) -> None:
+        self.assertEqual(
+            PARSER.split_top_level_andand("echo trap && echo set"),
+            ["echo trap", "echo set"],
+        )
+
     def test_reserved_word_as_argument_does_not_reject_a_simple_chain(self) -> None:
         self.assertEqual(
             PARSER.split_top_level_andand("echo done && echo ready"),

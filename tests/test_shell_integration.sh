@@ -79,14 +79,18 @@ grep -F $'item-0\tcompleted\t' "$cancel_snapshot" >/dev/null
 grep -F $'item-1\tstopped\t' "$cancel_snapshot" >/dev/null
 
 set +e
+sigint_marker="$runtime_dir/sigint-marker"
+sigint_trap_state="$runtime_dir/sigint-trap-state"
 trap_output=$(env \
     XDG_RUNTIME_DIR="$runtime_dir" \
     DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
+    DYNQUEUE_BASH_PRECHECKED=1 \
     SHELL_SESSION_ID=custom-trap-test \
     bash --noprofile --norc -i <<EOF
 trap 'printf "CUSTOM_INT\n"' INT
 source "$project_root/src/shell/dynqueue.bash"
-true && printf 'ORIGINAL_CHAIN\n'
+printf 'ORIGINAL_CHAIN_EXECUTED\n' >> "$sigint_marker" && printf 'QUEUE_FINISHED\n'
+trap -p INT > "$sigint_trap_state"
 EOF
 )
 trap_status=$?
@@ -96,9 +100,33 @@ if ((trap_status != 0)); then
     printf 'custom SIGINT trap test exited unexpectedly with status %s\n' "$trap_status" >&2
     exit 1
 fi
-if [[ "$trap_output" != *ORIGINAL_CHAIN* ]] || [[ "$trap_output" == *CUSTOM_INT* ]]; then
+if [[ "$trap_output" != *QUEUE_FINISHED* ]] || [[ "$trap_output" == *CUSTOM_INT* ]] \
+    || ! [[ -f "$sigint_marker" ]] || [[ $(wc -l <"$sigint_marker") -ne 1 ]] \
+    || ! grep -Fq "CUSTOM_INT" "$sigint_trap_state"; then
     printf '%s\n' "$trap_output" >&2
-    printf 'an existing SIGINT trap was not left untouched\n' >&2
+    printf 'the existing SIGINT trap was not preserved or the chain ran more than once\n' >&2
+    exit 1
+fi
+
+debug_marker="$runtime_dir/debug-marker"
+set +e
+debug_output=$(env \
+    XDG_RUNTIME_DIR="$runtime_dir" \
+    DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
+    SHELL_SESSION_ID=custom-debug-test \
+    bash --noprofile --norc -i 2>&1 <<EOF
+trap ':' DEBUG
+source "$project_root/src/shell/dynqueue.bash"
+printf 'DEBUG_CHAIN_EXECUTED\n' >> "$debug_marker" && printf 'DEBUG_CHAIN_DONE\n'
+EOF
+)
+debug_status=$?
+set -e
+if ((debug_status != 0)) || [[ "$debug_output" != *"DynQueue] not loaded"* ]] \
+    || [[ "$debug_output" != *DEBUG_CHAIN_DONE* ]] || ! [[ -f "$debug_marker" ]] \
+    || [[ $(wc -l <"$debug_marker") -ne 1 ]]; then
+    printf '%s\n' "$debug_output" >&2
+    printf 'an existing DEBUG trap was not left untouched\n' >&2
     exit 1
 fi
 
@@ -110,16 +138,19 @@ option_output=$(env \
     SHELL_SESSION_ID=shell-options-test \
     bash --noprofile --norc -i <<EOF
 set -eE -T
-trap 'echo ERR_HOOK_SHOULD_NOT_RUN' ERR
+trap 'echo ERR_HOOK_AFTER_QUEUE' ERR
 source "$project_root/src/shell/dynqueue.bash"
 true && echo OPTIONS_CHAIN
 echo OPTIONS_AFTER
+set +e
+false
+true
 EOF
 )
 option_status=$?
 set -e
 if ((option_status != 0)) || [[ "$option_output" != *OPTIONS_CHAIN* ]] || [[ "$option_output" != *OPTIONS_AFTER* ]] \
-    || [[ "$option_output" == *ERR_HOOK_SHOULD_NOT_RUN* ]]; then
+    || [[ "$option_output" != *ERR_HOOK_AFTER_QUEUE* ]]; then
     printf '%s\n' "$option_output" >&2
     printf 'shell option compatibility test failed with status %s\n' "$option_status" >&2
     exit 1

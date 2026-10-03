@@ -4,7 +4,9 @@
 # input alone.  A DEBUG trap only inspects the first command associated with a
 # new history entry; when the entry contains a real top-level && chain, the
 # chain is parsed by dynqueue-parser.py and executed item-by-item in this same
-# shell.  A SIGINT then cancels Bash's original, still-pending compound line.
+# shell.  Bash's extdebug option is used to skip the original history entry
+# after the queue has finished; DynQueue does not synthesize a signal or
+# replace the user's SIGINT behavior.
 
 if [[ $- == *i* ]]; then
     if [[ -z ${__DYNQUEUE_BASH_LOADED:-} ]]; then
@@ -31,24 +33,10 @@ if [[ $- == *i* ]]; then
         __dynqueue_session_id=${__dynqueue_session_raw//[^[:alnum:]._-]/_}
         __dynqueue_session_dir="${__dynqueue_runtime_base}/${__dynqueue_session_id}"
 
-        # DynQueue's final safety step uses SIGINT to prevent Bash from
-        # continuing the original compound command after the queue has run.
-        # An existing SIGINT trap could swallow that signal and allow the
-        # original command to run a second time, so leave the shell entirely
-        # untouched when one is already installed.
-        if [[ -n "$__dynqueue_parser" ]]; then
-            mkdir -p "$__dynqueue_session_dir" 2>/dev/null || true
-        fi
-        __dynqueue_trap_probe="${__dynqueue_session_dir}/trap-probe.$$"
-        trap -p INT >"$__dynqueue_trap_probe" 2>/dev/null || true
-        IFS= read -r __dynqueue_existing_int_trap <"$__dynqueue_trap_probe" || __dynqueue_existing_int_trap=
-        rm -f -- "$__dynqueue_trap_probe"
-        if [[ -n "$__dynqueue_parser" ]] && [[ -n "$__dynqueue_existing_int_trap" ]]; then
-            printf '[DynQueue] disabled: an existing SIGINT trap was detected; normal shell behavior is unchanged.\n' >&2
-        fi
-
-        if [[ -n "$__dynqueue_parser" ]] && [[ -z "$__dynqueue_existing_int_trap" ]] \
-            && mkdir -p "$__dynqueue_session_dir" 2>/dev/null; then
+        # SIGINT is deliberately not inspected or modified.  Queue
+        # cancellation is file-based, so the user's Ctrl+C behavior remains
+        # completely under their control.
+        if [[ -n "$__dynqueue_parser" ]] && mkdir -p "$__dynqueue_session_dir" 2>/dev/null; then
             chmod 700 "$__dynqueue_runtime_base" "$__dynqueue_session_dir" 2>/dev/null || true
             printf '%s\n' "$$" >"${__dynqueue_session_dir}/shell.pid"
             chmod 600 "${__dynqueue_session_dir}/shell.pid" 2>/dev/null || true
@@ -57,6 +45,15 @@ if [[ $- == *i* ]]; then
             __dynqueue_current_index=-1
             __dynqueue_last_histcmd=
             __dynqueue_running=0
+            __dynqueue_skip_original=0
+            __dynqueue_skip_history=
+            __dynqueue_skip_status=1
+            __dynqueue_restoring=0
+            __dynqueue_restore_extdebug=0
+            __dynqueue_restore_errexit=0
+            __dynqueue_restore_err_trap_saved=0
+            __dynqueue_restore_err_trap_spec=
+            __dynqueue_current_err_trap=
             declare -ga __dynqueue_item_ids=()
             declare -ga __dynqueue_item_commands=()
             declare -ga __dynqueue_item_states=()
@@ -72,6 +69,66 @@ if [[ $- == *i* ]]; then
 
             __dynqueue_b64_decode() {
                 printf '%s' "$1" | base64 --decode 2>/dev/null
+            }
+
+            __dynqueue_prepare_original_skip() {
+                if shopt -q extdebug; then
+                    __dynqueue_restore_extdebug=0
+                else
+                    __dynqueue_restore_extdebug=1
+                fi
+
+                case $- in
+                    *e*) __dynqueue_restore_errexit=1; set +e ;;
+                    *) __dynqueue_restore_errexit=0 ;;
+                esac
+
+                if [[ -n "$__dynqueue_restore_err_trap_spec" ]]; then
+                    __dynqueue_restore_err_trap_saved=1
+                    # Bash evaluates the ERR trap associated with the DEBUG
+                    # trap's non-zero return after this function unwinds.  A
+                    # temporary no-op is therefore more reliable than
+                    # removing the trap entirely; the exact user trap is
+                    # restored on the next history entry.
+                    trap ':' ERR
+                else
+                    __dynqueue_restore_err_trap_saved=0
+                    trap - ERR
+                fi
+
+                # Bash's extdebug mode makes a non-zero DEBUG trap return skip
+                # the command that was about to run.  This is the supported
+                # shell-level cancellation mechanism and avoids sending a
+                # synthetic SIGINT through user or foreground-process state.
+                shopt -s extdebug 2>/dev/null || return 1
+                __dynqueue_skip_original=1
+                return 0
+            }
+
+            __dynqueue_restore_after_skip() {
+                __dynqueue_skip_original=0
+                __dynqueue_restoring=1
+
+                if ((__dynqueue_restore_err_trap_saved)); then
+                    eval "$__dynqueue_restore_err_trap_spec"
+                else
+                    trap - ERR
+                fi
+                if ((__dynqueue_restore_extdebug)); then
+                    shopt -u extdebug 2>/dev/null || true
+                fi
+                if ((__dynqueue_restore_errexit)); then
+                    set -e
+                fi
+
+                __dynqueue_restore_err_trap_saved=0
+                __dynqueue_restore_err_trap_spec=
+                __dynqueue_restore_extdebug=0
+                __dynqueue_restore_errexit=0
+                __dynqueue_skip_history=
+                __dynqueue_skip_status=1
+                __dynqueue_restoring=0
+                return 0
             }
 
             __dynqueue_write_snapshot() {
@@ -216,6 +273,7 @@ if [[ $- == *i* ]]; then
                     else
                         status=$?
                     fi
+
                     if ((status == 0)); then
                         __dynqueue_item_states[index]=completed
                         __dynqueue_write_snapshot
@@ -245,23 +303,28 @@ if [[ $- == *i* ]]; then
 
             __dynqueue_debug_trap() {
                 local saved_status=$?
+                if ((__dynqueue_restoring)); then
+                    return "$saved_status"
+                fi
+                if ((__dynqueue_skip_original)); then
+                    # A compound `a && b` line produces one DEBUG event for
+                    # each simple command.  Keep skipping while Bash is still
+                    # on the history entry that DynQueue replaced; restoring
+                    # on the first event of the next history entry lets the
+                    # user's next command run normally.
+                    if [[ ${HISTCMD:-} == "$__dynqueue_skip_history" ]]; then
+                        return "$__dynqueue_skip_status"
+                    fi
+                    __dynqueue_restore_after_skip
+                    return 0
+                fi
                 [[ $__dynqueue_running == 0 ]] || return "$saved_status"
                 [[ $BASH_SUBSHELL == 0 ]] || return "$saved_status"
+                [[ $__dynqueue_extdebug_available == 1 ]] || return "$saved_status"
 
                 local current_history="${HISTCMD:-}"
                 [[ -n "$current_history" && "$current_history" != "$__dynqueue_last_histcmd" ]] || return "$saved_status"
                 __dynqueue_last_histcmd=$current_history
-
-                # The abort path is only safe while SIGINT retains Bash's
-                # normal behavior.  If a user installs a SIGINT trap after
-                # DynQueue was sourced, leave this command on the ordinary
-                # Bash path instead of risking duplicate execution.
-                local current_int_trap
-                __dynqueue_trap_probe="${__dynqueue_session_dir}/int-trap-probe.$$.$RANDOM"
-                trap -p INT >"$__dynqueue_trap_probe" 2>/dev/null || true
-                IFS= read -r current_int_trap <"$__dynqueue_trap_probe" || current_int_trap=
-                rm -f -- "$__dynqueue_trap_probe"
-                [[ -z "$current_int_trap" ]] || return "$saved_status"
 
                 local old_history_time_format=${HISTTIMEFORMAT:-}
                 HISTTIMEFORMAT=
@@ -293,42 +356,38 @@ if [[ $- == *i* ]]; then
                 else
                     queue_status=$?
                 fi
-                # Bash has no supported DEBUG-trap return value that cancels
-                # the current compound command.  SIGINT is the same abort path
-                # Bash uses for Ctrl+C and leaves the just-typed line out of
-                # the shell's execution stream after the queue has run.
-                local errexit_was_set=0
-                case $- in
-                    *e*) errexit_was_set=1; set +e ;;
-                esac
 
-                # The self-SIGINT normally returns status 130.  Temporarily
-                # suspend an existing ERR trap so DynQueue does not fabricate
-                # an error notification for its own abort mechanism, then
-                # restore the user's exact trap definition.
-                local err_trap_spec= err_trap_saved=0
-                __dynqueue_trap_probe="${__dynqueue_session_dir}/err-trap-probe.$$.$RANDOM"
-                trap -p ERR >"$__dynqueue_trap_probe" 2>/dev/null || true
-                if IFS= read -r err_trap_spec <"$__dynqueue_trap_probe"; then
-                    err_trap_saved=1
-                    trap - ERR
-                fi
-                rm -f -- "$__dynqueue_trap_probe"
-                kill -INT "$$" 2>/dev/null
-                if ((err_trap_saved)); then
-                    eval "$err_trap_spec"
-                fi
-                if ((errexit_was_set)); then
-                    set -e
-                fi
-                return "$queue_status"
+                # The queue has already taken the place of the original
+                # command.  Return non-zero with extdebug enabled so Bash
+                # skips that original command exactly once.  A successful
+                # queue uses status 1 solely for the skip; failures retain
+                # their own non-zero status in the interactive shell.
+                __dynqueue_restore_err_trap_spec="$__dynqueue_current_err_trap"
+                __dynqueue_prepare_original_skip || return "$saved_status"
+                local skip_status=$queue_status
+                ((skip_status == 0)) && skip_status=1
+                __dynqueue_skip_history=$current_history
+                __dynqueue_skip_status=$skip_status
+                return "$skip_status"
             }
 
             __dynqueue_install_debug_trap() {
-                trap '__dynqueue_debug_trap' DEBUG
+                trap 'if [[ ${__dynqueue_running:-0} == 0 ]]; then __dynqueue_current_err_trap=$(trap -p ERR 2>/dev/null || true); fi; __dynqueue_debug_trap' DEBUG
             }
 
-            __dynqueue_install_debug_trap
+            __dynqueue_extdebug_available=1
+            if ! shopt -q extdebug; then
+                if shopt -s extdebug 2>/dev/null; then
+                    shopt -u extdebug 2>/dev/null || __dynqueue_extdebug_available=0
+                else
+                    __dynqueue_extdebug_available=0
+                fi
+            fi
+            if ((__dynqueue_extdebug_available)); then
+                __dynqueue_install_debug_trap
+            else
+                printf '[DynQueue] disabled: this Bash does not support the safe command-skip hook.\n' >&2
+            fi
         fi
         fi
     fi

@@ -6,27 +6,22 @@
     declarations needed by the plugin are kept here.
 
     The IKonsolePlugin declaration mirrors Konsole's
-    src/pluginsystem/IKonsolePlugin.h.  The controller shim mirrors the
-    beginning of SessionController's object layout only far enough to call
-    its inline session() accessor.  The install/build checks require matching
-    Konsole major and minor versions, and the README explains this constraint.
+    src/pluginsystem/IKonsolePlugin.h.  SessionController's public session()
+    accessor is inline in Konsole's private headers, so DynQueue locates the
+    controller's exported SessionDisplayConnection child through QObject
+    introspection instead of assuming the private controller object layout.
+    The install/build checks require an exact matching Konsole version.
 */
 
 #pragma once
 
 #include <QAction>
-#include <QColor>
-#include <QIcon>
 #include <QList>
 #include <QObject>
 #include <QPointer>
 #include <QString>
-#include <QUrl>
-
-#include <KXMLGUIClient>
 
 #include <memory>
-#include <optional>
 
 #if defined(_WIN32)
 #define DYNQUEUE_KONSOLE_EXPORT __declspec(dllimport)
@@ -75,44 +70,9 @@ public:
     QString shellSessionId() const;
 };
 
-class DYNQUEUE_KONSOLE_EXPORT SessionDisplayConnection
+class DYNQUEUE_KONSOLE_EXPORT SessionDisplayConnection : public QObject
 {
 public:
     QPointer<Session> session();
-};
-
-// Only sizeof(ViewProperties) is relevant to the controller shim.  These
-// fields mirror current Konsole's ViewProperties.h.
-class ViewPropertiesCompat : public QObject
-{
-public:
-    virtual ~ViewPropertiesCompat() = default;
-    virtual QUrl url() const;
-    virtual QString currentDir() const;
-    virtual bool confirmClose() const;
-
-private:
-    QIcon _icon;
-    QString _title;
-    QColor _color;
-    QColor _activityColor;
-    int _identifier = 0;
-    std::optional<int> _progress;
-};
-
-// SessionController has two direct bases followed by these two pointers.
-// This is deliberately isolated so a future Konsole plugin SDK can replace
-// it without changing the rest of DynQueue.
-class SessionControllerCompat : public ViewPropertiesCompat, public KXMLGUIClient
-{
-private:
-    void *_copyToGroup = nullptr;
-    SessionDisplayConnection *_sessionDisplayConnection = nullptr;
-
-public:
-    QPointer<Session> session() const
-    {
-        return _sessionDisplayConnection == nullptr ? QPointer<Session>() : _sessionDisplayConnection->session();
-    }
 };
 }

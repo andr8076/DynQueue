@@ -96,11 +96,10 @@ fi
     printf 'if [[ -f %q ]]; then\n' "$bash_source"
     printf '    if __dynqueue_trap_probe=$(mktemp "${XDG_RUNTIME_DIR:-/tmp}/dynqueue-trap-probe.XXXXXX"); then\n'
     printf '        trap -p DEBUG >"$__dynqueue_trap_probe" 2>/dev/null || true\n'
-    printf '        trap -p INT >>"$__dynqueue_trap_probe" 2>/dev/null || true\n'
     printf '        if [[ ! -s "$__dynqueue_trap_probe" ]]; then\n'
     printf '            DYNQUEUE_BASH_PRECHECKED=1 source %q\n' "$bash_source"
     printf '        else\n'
-    printf '            printf "[DynQueue] disabled: an existing DEBUG or SIGINT trap was detected; normal shell behavior is unchanged.\\n" >&2\n'
+    printf '            printf "[DynQueue] disabled: an existing DEBUG trap was detected; normal shell behavior is unchanged.\\n" >&2\n'
     printf '        fi\n'
     printf '        rm -f -- "$__dynqueue_trap_probe"\n'
     printf '        unset __dynqueue_trap_probe\n'

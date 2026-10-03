@@ -47,11 +47,12 @@ created.
 - CMake, a C++ compiler, ECM, Qt6, KF6 CoreAddons, KF6 I18n, and KF6 XmlGui
 
 Konsole currently does not ship a separate external-plugin SDK. DynQueue keeps
-the minimum ABI declarations in `src/plugin/konsole_api_compat.h`. The plugin
-also checks the exact Konsole version exposed by the host process and disables
-its UI when it differs from the version used for the build. If Konsole does
-not expose a version, DynQueue logs a warning and continues because there is
-no supported runtime API for a stronger check. Rebuild DynQueue after every
+the minimum declarations in `src/plugin/konsole_api_compat.h`. The plugin
+locates the active session through Konsole's exported
+`SessionDisplayConnection` QObject instead of assuming the private
+`SessionController` member layout. It also checks the exact Konsole version
+exposed by the host process and disables its UI when the version is missing or
+differs from the version used for the build. Rebuild DynQueue after every
 Konsole upgrade.
 
 ## Install on Arch / EndeavourOS
@@ -64,9 +65,10 @@ The user-local installer is the normal route:
 
 It builds the plugin, installs it below `~/.local`, adds an idempotent Bash
 source block to `~/.bashrc`, and adds the user plugin directory to the Plasma
-session environment. The source block checks for existing Bash `DEBUG` and
-`SIGINT` traps first. If either exists, DynQueue stays disabled so it cannot
-replace shell customizations or interfere with Ctrl+C behavior. Start a new
+session environment. The source block checks for an existing Bash `DEBUG` trap
+first. If one exists, DynQueue stays disabled so it cannot replace shell
+customizations. DynQueue does not install or synthesize a `SIGINT` trap, so an
+existing Ctrl+C handler continues to belong to the user. Start a new
 Plasma session, or launch Konsole once with the printed `QT_PLUGIN_PATH`
 command.
 
@@ -114,10 +116,10 @@ bash -n src/shell/dynqueue.bash
 ```
 
 The tests cover real chains, quoted `&&`, pipelines, redirection, command
-substitution, brace groups, `[[ ... ]]`, shell control constructs, `cd`,
-`export`, incomplete chains, normal command handling, failure stopping the
-remaining queue, safe queue cancellation, existing SIGINT traps, and Bash
-`errexit`/`errtrace`/`functrace` options.
+substitution, brace groups, `[[ ... ]]`, shell control constructs, shell-state
+mutations, `cd`, `export`, incomplete chains, normal command handling, failure
+stopping the remaining queue, safe queue cancellation, existing SIGINT and
+DEBUG traps, and Bash `errexit`/`errtrace`/`functrace` options.
 Manual checks should also cover ordinary `ls`, `ssh`, `nano`, `htop`, Python,
 and `sudo` input, plus:
 
@@ -142,6 +144,8 @@ the normal way to interrupt the current command immediately.
   executes them normally instead of DynQueue rewriting them.
 - Queue state is intentionally not persistent.
 - The sidebar can be hidden without stopping a queue.
-- The current shell bridge uses Bash's DEBUG trap and SIGINT abort path because
-  Konsole does not expose a pre-execution plugin hook. The installer refuses
-  to enable DynQueue when a custom DEBUG or SIGINT trap is already present.
+- The current shell bridge uses Bash's DEBUG trap because Konsole does not
+  expose a pre-execution plugin hook. Bash's `extdebug` mode skips every
+  simple command in the replaced history entry, so DynQueue does not send a
+  synthetic signal. The installer refuses to enable DynQueue when a custom
+  DEBUG trap is already present; custom SIGINT traps are supported.

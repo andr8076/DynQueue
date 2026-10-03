@@ -40,6 +40,7 @@ def split_top_level_andand(source: str) -> Optional[list[str]]:
     word_plain = True
     word_active = False
     contains_shell_construct = False
+    contains_unsafe_shell_command = False
     shell_construct_words = {
         "case",
         "coproc",
@@ -59,13 +60,46 @@ def split_top_level_andand(source: str) -> Optional[list[str]]:
         "until",
         "while",
     }
+    # These commands can replace DynQueue's DEBUG hook, terminate/replace the
+    # interactive shell, or mutate the shell machinery that identifies the
+    # current history entry.  Let Bash execute such lines normally rather
+    # than trying to queue them and risk replaying the original compound line.
+    unsafe_shell_words = {
+        ".",
+        "bind",
+        "builtin",
+        "enable",
+        "eval",
+        "exec",
+        "exit",
+        "fc",
+        "history",
+        "logout",
+        "return",
+        "set",
+        "shopt",
+        "source",
+        "trap",
+        "typeset",
+        "unset",
+    }
+
+    def is_assignment_word(value: str) -> bool:
+        name, separator, _ = value.partition("=")
+        return bool(separator and name and (name[0].isalpha() or name[0] == "_") and all(character.isalnum() or character == "_" for character in name[1:]))
 
     def finish_word() -> None:
-        nonlocal word_active, word_plain, contains_shell_construct, command_position
-        if command_position and word_active and word_plain and "".join(word) in shell_construct_words:
-            contains_shell_construct = True
+        nonlocal word_active, word_plain, contains_shell_construct, contains_unsafe_shell_command, command_position
+        word_value = "".join(word)
+        if command_position and word_active and word_plain:
+            if word_value in shell_construct_words:
+                contains_shell_construct = True
+            if word_value in unsafe_shell_words:
+                contains_unsafe_shell_command = True
         if word_active:
-            command_position = False
+            # Assignment prefixes do not end Bash's command position.  This
+            # keeps `NAME=value trap ...` in the conservative fallback path.
+            command_position = is_assignment_word(word_value)
         word.clear()
         word_active = False
         word_plain = True
@@ -213,6 +247,7 @@ def split_top_level_andand(source: str) -> Optional[list[str]]:
         or brace_depth != 0
         or test_depth != 0
         or contains_shell_construct
+        or contains_unsafe_shell_command
     ):
         return None
 
