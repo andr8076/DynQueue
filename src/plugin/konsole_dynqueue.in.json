@@ -1,0 +1,9 @@
+{
+    "KPlugin": {
+        "Name": "DynQueue",
+        "Description": "A small editable command queue for top-level Bash && chains",
+        "Icon": "view-list-details",
+        "License": "GPL-2.0-or-later",
+        "Version": "@DYNQUEUE_KONSOLE_VERSION@"
+    }
+}
