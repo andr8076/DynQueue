@@ -10,8 +10,10 @@ output=$(env \
     XDG_RUNTIME_DIR="$runtime_dir" \
     DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
     DYNQUEUE_BASH_PRECHECKED=1 \
-bash --noprofile --norc -i <<EOF
+    DYNQUEUE_DEBUG=1 \
+    bash --noprofile --norc -i <<EOF
 set +e
+printf 'flags-before-source=%s\n' "\$-"
 source "$project_root/src/shell/dynqueue.bash"
 printf 'normal\n'
 echo one && echo two
@@ -29,6 +31,7 @@ set -e
 
 if ((status != 0 && status != 130)); then
     printf '%s\n' "$output" >&2
+    find "$runtime_dir" -type f -print -exec sed -n '1,160p' {} \; >&2
     printf 'interactive Bash integration exited unexpectedly with status %s\n' "$status" >&2
     exit 1
 fi
