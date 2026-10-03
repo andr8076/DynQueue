@@ -11,10 +11,8 @@ env \
     XDG_RUNTIME_DIR="$runtime_dir" \
     DYNQUEUE_PARSER="$project_root/src/dynqueue-parser.py" \
     DYNQUEUE_BASH_PRECHECKED=1 \
-    DYNQUEUE_DEBUG=1 \
     bash --noprofile --norc -i >"$output_file" <<EOF || status=$?
 set +e
-printf 'flags-before-source=%s\n' "\$-"
 source "$project_root/src/shell/dynqueue.bash"
 printf 'normal\n'
 echo one && echo two
@@ -32,9 +30,6 @@ else
     output=
     printf 'first test output file disappeared: %s\n' "$output_file" >&2
 fi
-printf 'first-child-status=%s\n' "$status" >&2
-printf '%s\n' "$output" >&2
-find "$runtime_dir" -type f -print -exec sed -n '1,80p' {} \; >&2
 
 if ((status != 0 && status != 130)); then
     printf '%s\n' "$output" >&2
@@ -42,7 +37,6 @@ if ((status != 0 && status != 130)); then
     printf 'interactive Bash integration exited unexpectedly with status %s\n' "$status" >&2
     exit 1
 fi
-set -e
 
 for expected in normal one two 'one && two' SHOULD_RUN /tmp 'test=hello' 'after=hello' after-failure; do
     if [[ "$output" != *"$expected"* ]]; then
