@@ -89,7 +89,7 @@ if(NOT KONSOLE_APP_LIBRARY OR NOT KONSOLE_PRIVATE_LIBRARY)
         "with -DKONSOLE_APP_LIBRARY=... and -DKONSOLE_PRIVATE_LIBRARY=....")
 endif()
 
-set(DYNQUEUE_PLUGIN_INSTALL_DIR "lib/qt6/plugins/konsoleplugins" CACHE PATH
+set(DYNQUEUE_PLUGIN_INSTALL_DIR "lib/qt6/plugins/konsoleplugins" CACHE STRING
     "Directory below the install prefix where the Konsole plugin is installed")
 
 add_subdirectory(src)
