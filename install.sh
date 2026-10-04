@@ -133,7 +133,7 @@ if [[ $mode == user ]]; then
         printf 'if [[ -n "$dynqueue_version" ]] && [[ -f %q ]] && [[ $(<%q) == "$dynqueue_version" ]] && [[ -f %q ]]; then\n' \
             "$prefix/share/dynqueue/konsole-build-version" \
             "$prefix/share/dynqueue/konsole-build-version" \
-            "$plugin_dir/konsoleplugins/libkonsole_dynqueueplugin.so"
+            "$plugin_dir/konsoleplugins/konsole_dynqueueplugin.so"
         printf '    export QT_PLUGIN_PATH=%q${QT_PLUGIN_PATH:+:$QT_PLUGIN_PATH}\n' "$plugin_dir"
         printf 'fi\n'
     } >"$env_file"

@@ -18,7 +18,7 @@ fi
 
 state_dir="$prefix/share/dynqueue"
 marker="$state_dir/konsole-build-version"
-plugin="$prefix/$plugin_rel/libkonsole_dynqueueplugin.so"
+plugin="$prefix/$plugin_rel/konsole_dynqueueplugin.so"
 mkdir -p "$state_dir"
 
 exec 9>"$state_dir/.refresh.lock"
