@@ -27,22 +27,6 @@ DynQueueWidget::DynQueueWidget(QWidget *parent)
     mainLayout->setContentsMargins(8, 8, 8, 8);
     mainLayout->setSpacing(6);
 
-    auto *titleLayout = new QHBoxLayout;
-    auto *title = new QLabel(tr("Command Queue"), this);
-    QFont titleFont = title->font();
-    titleFont.setBold(true);
-    title->setFont(titleFont);
-    titleLayout->addWidget(title);
-    titleLayout->addStretch();
-
-    auto *closeButton = new QToolButton(this);
-    closeButton->setAutoRaise(true);
-    closeButton->setIcon(QIcon::fromTheme(QStringLiteral("window-close"), style()->standardIcon(QStyle::SP_TitleBarCloseButton)));
-    closeButton->setToolTip(tr("Hide command queue"));
-    connect(closeButton, &QToolButton::clicked, this, &DynQueueWidget::closeRequested);
-    titleLayout->addWidget(closeButton);
-    mainLayout->addLayout(titleLayout);
-
     _list = new QListWidget(this);
     _list->setSelectionMode(QAbstractItemView::SingleSelection);
     _list->setAlternatingRowColors(true);

@@ -73,11 +73,10 @@ if [[ $- == *i* ]]; then
             }
 
             __dynqueue_prepare_original_skip() {
-                if shopt -q extdebug; then
-                    __dynqueue_restore_extdebug=0
-                else
-                    __dynqueue_restore_extdebug=1
-                fi
+                # extdebug must already be enabled when Bash enters the
+                # DEBUG trap. Enabling it here is too late to skip the first
+                # command in the replaced history entry.
+                __dynqueue_restore_extdebug=0
 
                 case $- in
                     *e*) __dynqueue_restore_errexit=1; set +e ;;
@@ -101,7 +100,7 @@ if [[ $- == *i* ]]; then
                 # the command that was about to run.  This is the supported
                 # shell-level cancellation mechanism and avoids sending a
                 # synthetic SIGINT through user or foreground-process state.
-                shopt -s extdebug 2>/dev/null || return 1
+                shopt -q extdebug || return 1
                 __dynqueue_skip_original=1
                 return 0
             }
@@ -398,7 +397,7 @@ if [[ $- == *i* ]]; then
             __dynqueue_extdebug_available=1
             if ! shopt -q extdebug; then
                 if shopt -s extdebug 2>/dev/null; then
-                    shopt -u extdebug 2>/dev/null || __dynqueue_extdebug_available=0
+                    :
                 else
                     __dynqueue_extdebug_available=0
                 fi
