@@ -386,7 +386,7 @@ if [[ $- == *i* ]]; then
                 __dynqueue_prepare_original_skip || return "$saved_status"
                 local skip_status=$queue_status
                 ((skip_status == 0)) && skip_status=1
-                __dynqueue_skip_history=$current_history
+                __dynqueue_skip_history=$history_entry
                 __dynqueue_skip_status=$skip_status
                 return "$skip_status"
             }
