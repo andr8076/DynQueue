@@ -233,7 +233,11 @@ DynQueuePlugin::DynQueuePlugin(QObject *parent, const QVariantList &args)
     d->runtimeRoot = runtimeDirectory + QStringLiteral("/dynqueue-%1").arg(QString::number(getuid()));
 
     d->pollTimer = new QTimer(this);
-    d->pollTimer->setInterval(150);
+    // Keep progress updates responsive even while Konsole is processing
+    // terminal output.  A precise timer also avoids coarse-timer batching
+    // making a newly detected queue appear only after the first item ends.
+    d->pollTimer->setTimerType(Qt::PreciseTimer);
+    d->pollTimer->setInterval(75);
     connect(d->pollTimer, &QTimer::timeout, this, [this] {
         for (Private::WindowState *state : std::as_const(d->windows)) {
             if (state == nullptr) {
@@ -264,7 +268,16 @@ DynQueuePlugin::DynQueuePlugin(QObject *parent, const QVariantList &args)
 
             const QString snapshotPath = state->sessionDirectory + QLatin1Char('/') + QLatin1String(SnapshotFileName);
             Snapshot snapshot;
-            if (state->sessionId.isEmpty() || !liveShell(state->sessionDirectory) || !readSnapshot(snapshotPath, snapshot)) {
+            const bool shellAlive = !state->sessionId.isEmpty() && liveShell(state->sessionDirectory);
+            const bool snapshotReady = shellAlive && readSnapshot(snapshotPath, snapshot);
+            if (!snapshotReady) {
+                // Snapshot replacement is atomic, but the shell can still be
+                // between queue transitions. Keep an already visible queue
+                // until a valid replacement arrives instead of hiding the
+                // panel and making progress appear frozen.
+                if (shellAlive && !state->items.isEmpty() && !state->queueId.isEmpty() && !state->dock.isNull()) {
+                    continue;
+                }
                 state->items.clear();
                 state->queueId.clear();
                 state->snapshotContent.clear();
