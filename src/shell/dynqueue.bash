@@ -321,13 +321,31 @@ if [[ $- == *i* ]]; then
                 if ((__dynqueue_restoring)); then
                     return "$saved_status"
                 fi
+
+                # Some desktop shell integrations run a prompt/title command
+                # before the DEBUG trap.  In that situation HISTCMD can be
+                # one ahead of the entry returned by `history 1`.  Use the
+                # actual history entry number from the history output rather
+                # than requiring those two values to be identical.
+                local old_history_time_format=${HISTTIMEFORMAT:-}
+                HISTTIMEFORMAT=
+                local history_line history_entry entered_line
+                history_line=$(history 1)
+                HISTTIMEFORMAT=$old_history_time_format
+                if [[ "$history_line" =~ ^[[:space:]]*([0-9]+)[[:space:]](.*)$ ]]; then
+                    history_entry=${BASH_REMATCH[1]}
+                    entered_line=${BASH_REMATCH[2]}
+                else
+                    return "$saved_status"
+                fi
+
                 if ((__dynqueue_skip_original)); then
                     # A compound `a && b` line produces one DEBUG event for
                     # each simple command.  Keep skipping while Bash is still
                     # on the history entry that DynQueue replaced; restoring
                     # on the first event of the next history entry lets the
                     # user's next command run normally.
-                    if [[ ${HISTCMD:-} == "$__dynqueue_skip_history" ]]; then
+                    if [[ "$history_entry" == "$__dynqueue_skip_history" ]]; then
                         return "$__dynqueue_skip_status"
                     fi
                     __dynqueue_restore_after_skip
@@ -337,23 +355,8 @@ if [[ $- == *i* ]]; then
                 [[ $BASH_SUBSHELL == 0 ]] || return "$saved_status"
                 [[ $__dynqueue_extdebug_available == 1 ]] || return "$saved_status"
 
-                local current_history="${HISTCMD:-}"
-                [[ -n "$current_history" && "$current_history" != "$__dynqueue_last_histcmd" ]] || return "$saved_status"
-                __dynqueue_last_histcmd=$current_history
-
-                local old_history_time_format=${HISTTIMEFORMAT:-}
-                HISTTIMEFORMAT=
-                local history_line
-                history_line=$(history 1)
-                HISTTIMEFORMAT=$old_history_time_format
-
-                local entered_line
-                if [[ "$history_line" =~ ^[[:space:]]*([0-9]+)[[:space:]](.*)$ ]] \
-                    && [[ ${BASH_REMATCH[1]} == "$current_history" ]]; then
-                    entered_line=${BASH_REMATCH[2]}
-                else
-                    return "$saved_status"
-                fi
+                [[ "$history_entry" != "$__dynqueue_last_histcmd" ]] || return "$saved_status"
+                __dynqueue_last_histcmd=$history_entry
 
                 # Avoid changing multiline editing and here-document input in
                 # this MVP.  A future shell adapter can handle those forms.
