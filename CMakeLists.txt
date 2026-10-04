@@ -95,5 +95,5 @@ set(DYNQUEUE_PLUGIN_INSTALL_DIR "lib/qt6/plugins/konsoleplugins" CACHE PATH
 add_subdirectory(src)
 
 install(FILES src/shell/dynqueue.bash DESTINATION share/dynqueue)
-install(PROGRAMS src/shell/dynqueue-parser.py DESTINATION libexec)
+install(PROGRAMS src/dynqueue-parser.py DESTINATION libexec)
 install(PROGRAMS tools/dynqueue-refresh.sh DESTINATION libexec RENAME dynqueue-refresh)
