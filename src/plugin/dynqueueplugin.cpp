@@ -317,11 +317,11 @@ void DynQueuePlugin::createWidgetsForMainWindow(Konsole::MainWindow *mainWindow)
         return;
     }
 
-    auto *qtWindow = qobject_cast<QMainWindow *>(reinterpret_cast<QObject *>(mainWindow));
-    if (qtWindow == nullptr) {
-        qCWarning(DynQueueLog) << "Could not resolve Konsole main window";
-        return;
-    }
+    // Konsole::MainWindow directly inherits KXmlGuiWindow/QMainWindow.  The
+    // compatibility header intentionally keeps MainWindow opaque, so use the
+    // known base relationship instead of asking Qt's meta-object system to
+    // rediscover it through an incomplete type.
+    auto *qtWindow = reinterpret_cast<QMainWindow *>(mainWindow);
 
     auto *state = new Private::WindowState;
     state->mainWindow = mainWindow;
@@ -450,7 +450,7 @@ QList<QAction *> DynQueuePlugin::menuBarActions(Konsole::MainWindow *mainWindow)
         return {};
     }
 
-    auto *qtWindow = qobject_cast<QMainWindow *>(reinterpret_cast<QObject *>(mainWindow));
+    auto *qtWindow = reinterpret_cast<QMainWindow *>(mainWindow);
     auto *toggle = new QAction(i18n("Show Command Queue"), qtWindow);
     toggle->setCheckable(true);
     toggle->setIcon(QIcon::fromTheme(QStringLiteral("view-list-details")));
