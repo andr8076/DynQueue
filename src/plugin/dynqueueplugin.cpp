@@ -304,6 +304,23 @@ DynQueuePlugin::DynQueuePlugin(QObject *parent, const QVariantList &args)
             state->snapshotContent = snapshot.content;
             state->sessionDirectory = QFileInfo(snapshotPath).absolutePath();
             const bool queueActive = hasRunningItem(state->items);
+            const bool queueHasWaiting = std::any_of(state->items.cbegin(), state->items.cend(), [](const DynQueueItem &item) {
+                return item.state == DynQueueState::Waiting;
+            });
+            const bool queueFinished = !state->items.isEmpty() && !queueActive && !queueHasWaiting;
+            if (queueFinished) {
+                // Completed, failed, and stopped queues are no longer useful
+                // in the sidebar once the chain has reached a terminal state.
+                state->items.clear();
+                state->queueId.clear();
+                state->snapshotContent.clear();
+                state->stopRequested = false;
+                state->widget->clearQueue();
+                state->changingVisibility = true;
+                state->dock->hide();
+                state->changingVisibility = false;
+                continue;
+            }
             if (!queueActive) {
                 state->stopRequested = false;
             }
